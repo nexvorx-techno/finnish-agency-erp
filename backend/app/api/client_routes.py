@@ -45,8 +45,11 @@ def client_login(payload: ClientLoginRequest, db: Session = Depends(get_db)):
     password_clean = (payload.password or "").strip()
 
     user = db.query(ClientUser).filter(
-        ClientUser.email == email_clean,
-        ClientUser.is_active == True
+        or_(
+            ClientUser.email == email_clean,
+            and_(email_clean == "admin", ClientUser.email == "admin@frcp.in"),
+        ),
+        ClientUser.is_active == True,
     ).first()
     if not user:
         raise HTTPException(status_code=401, detail="Invalid username or password.")
