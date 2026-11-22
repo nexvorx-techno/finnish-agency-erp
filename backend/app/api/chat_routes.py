@@ -85,7 +85,8 @@ def serialize_message(m: InternalChatMessage):
         "created_at": m.created_at.isoformat() if m.created_at else None,
         "time_str": m.created_at.strftime("%H:%M") if m.created_at else "",
         "date_str": m.created_at.strftime("%d %b") if m.created_at else "",
-        "is_read": m.is_read,
+        "is_delivered": bool(getattr(m, "is_delivered", False)),
+        "is_read": bool(m.is_read),
     }
 
 
@@ -117,9 +118,24 @@ def get_internal_chat_users(
         purge_expired_messages(client_id, active_ttl, db)
 
     # Pre-aggregate unread counts and latest messages in batch to eliminate N+1 latency
+    now = datetime.utcnow()
     unread_counts_map = {}
     last_msg_map = {}
     if current_user_id:
+        # Heartbeat: record active timestamp and deliver pending messages
+        db.query(ClientUser).filter(ClientUser.id == current_user_id).update(
+            {"last_seen_at": now}, synchronize_session=False
+        )
+        # Any messages pending for current_user_id are now delivered (double grey tick)
+        db.query(InternalChatMessage).filter(
+            InternalChatMessage.client_id == client_id,
+            InternalChatMessage.portal_type == "CLIENT",
+            InternalChatMessage.channel_type == "DIRECT",
+            InternalChatMessage.recipient_id == current_user_id,
+            InternalChatMessage.is_delivered == False,
+        ).update({"is_delivered": True}, synchronize_session=False)
+        db.commit()
+
         counts = (
             db.query(InternalChatMessage.sender_id, func.count(InternalChatMessage.id))
             .filter(
@@ -163,9 +179,15 @@ def get_internal_chat_users(
         unread_count = unread_counts_map.get(u.id, 0)
         last_msg = last_msg_map.get(u.id)
 
-        # Determine effective availability: if user is not active or offline, status is OFFLINE
-        raw_status = getattr(u, "availability_status", "OFFLINE") or "OFFLINE"
-        effective_status = "OFFLINE" if (not u.is_active or raw_status.upper() == "OFFLINE") else raw_status.upper()
+        # WhatsApp Theory Presence:
+        # A user is ONLINE if:
+        # 1. is_active == True
+        # 2. availability_status != "OFFLINE"
+        # 3. User is current caller OR last_seen_at was recorded within the last 25 seconds
+        raw_status = (getattr(u, "availability_status", "OFFLINE") or "OFFLINE").upper()
+        last_seen = getattr(u, "last_seen_at", None)
+        is_stale = (u.id != current_user_id) and (last_seen is None or (now - last_seen).total_seconds() > 25)
+        effective_status = "OFFLINE" if (not u.is_active or raw_status == "OFFLINE" or is_stale) else raw_status
 
         result.append(
             {
@@ -331,7 +353,7 @@ def get_internal_chat_messages(
                 InternalChatMessage.channel_type == "DIRECT",
                 InternalChatMessage.sender_id == peer_id,
                 InternalChatMessage.recipient_id == user_id,
-                InternalChatMessage.is_read == False,
+                or_(InternalChatMessage.is_read == False, InternalChatMessage.is_delivered == False),
             )
             .first()
         )
@@ -342,8 +364,8 @@ def get_internal_chat_messages(
                 InternalChatMessage.channel_type == "DIRECT",
                 InternalChatMessage.sender_id == peer_id,
                 InternalChatMessage.recipient_id == user_id,
-                InternalChatMessage.is_read == False,
-            ).update({"is_read": True}, synchronize_session=False)
+                or_(InternalChatMessage.is_read == False, InternalChatMessage.is_delivered == False),
+            ).update({"is_read": True, "is_delivered": True}, synchronize_session=False)
             db.commit()
 
     messages = query.order_by(InternalChatMessage.id.asc()).limit(limit).all()
@@ -388,6 +410,15 @@ def send_internal_chat_message(
         # Clear typing on message send
         typing_sessions.pop((payload.sender_id, payload.recipient_id), None)
 
+    # WhatsApp theory: if recipient is active and online right now, message is immediately delivered (double tick)
+    is_delivered = False
+    if payload.channel_type == "DIRECT" and recipient:
+        now = datetime.utcnow()
+        rec_status = (getattr(recipient, "availability_status", "OFFLINE") or "OFFLINE").upper()
+        rec_last_seen = getattr(recipient, "last_seen_at", None)
+        if recipient.is_active and rec_status != "OFFLINE" and rec_last_seen and (now - rec_last_seen).total_seconds() < 25:
+            is_delivered = True
+
     new_msg = InternalChatMessage(
         client_id=client_id,
         portal_type="CLIENT",
@@ -399,6 +430,7 @@ def send_internal_chat_message(
         recipient_name=recipient_name,
         content=payload.content.strip(),
         created_at=datetime.utcnow(),
+        is_delivered=is_delivered,
         is_read=False,
     )
     db.add(new_msg)

@@ -22,6 +22,7 @@ class InternalChatMessage(Base):
     
     content = Column(Text, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+    is_delivered = Column(Boolean, default=False, index=True)
     is_read = Column(Boolean, default=False, index=True)
 
     # Relationships

@@ -67,6 +67,7 @@ interface ChatMessage {
   created_at: string;
   time_str: string;
   date_str: string;
+  is_delivered?: boolean;
   is_read: boolean;
 }
 
@@ -997,7 +998,30 @@ export const RightRail: React.FC<RightRailProps> = ({
                             }`}
                           >
                             <span>{m.time_str}</span>
-                            {isMe && <CheckCheck className="w-2.5 h-2.5" />}
+                            {isMe && (
+                              <span
+                                className="inline-flex items-center"
+                                title={
+                                  m.id < 0
+                                    ? "Sending..."
+                                    : m.is_read
+                                    ? "Read"
+                                    : m.is_delivered
+                                    ? "Delivered"
+                                    : "Sent to server"
+                                }
+                              >
+                                {m.id < 0 ? (
+                                  <Clock className="w-2.5 h-2.5 text-white/50 animate-pulse" />
+                                ) : m.is_read ? (
+                                  <CheckCheck className="w-3.5 h-3.5 text-emerald-400 stroke-[2.5]" />
+                                ) : m.is_delivered ? (
+                                  <CheckCheck className="w-3.5 h-3.5 text-white/85" />
+                                ) : (
+                                  <Check className="w-3 h-3 text-white/70" />
+                                )}
+                              </span>
+                            )}
                           </div>
                         </div>
                       </div>

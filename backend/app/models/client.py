@@ -63,6 +63,7 @@ class ClientUser(Base):
 
     # Availability & Chat Settings
     availability_status = Column(String(50), default="OFFLINE")  # ONLINE, BUSY, LUNCH, OFF_DUTY, BREAK, OUTSIDE, NOT_AVAILABLE, OFFLINE
+    last_seen_at = Column(DateTime, default=datetime.utcnow, nullable=True)
     not_available_from = Column(String(50), nullable=True)  # YYYY-MM-DD HH:MM
     not_available_to = Column(String(50), nullable=True)    # YYYY-MM-DD HH:MM
     not_available_reason = Column(String(255), nullable=True)

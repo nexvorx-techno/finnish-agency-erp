@@ -453,22 +453,48 @@ export default function ClientPortalPage() {
     setIsPinSetupOpen(false);
   };
 
-  // Window unload listener: Set presence to OFFLINE when closing tab/browser
+  // Real-time WhatsApp Presence Lifecycle:
+  // - Screen locked / tab minimized / phone app backgrounded: set OFFLINE
+  // - Screen unlocked / tab visible: restore ONLINE
+  // - Tab closed / browser exit: set OFFLINE
   useEffect(() => {
     if (!currentUser) return;
-    const handleUnload = () => {
-      fetch(`${API_BASE}/api/client/${currentUser.clientId}/chat/availability`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          user_id: currentUser.userId,
-          availability_status: "OFFLINE",
-        }),
-        keepalive: true,
-      }).catch(() => {});
+
+    const setPresence = (status: "ONLINE" | "OFFLINE") => {
+      try {
+        fetch(`${API_BASE}/api/client/${currentUser.clientId}/chat/availability`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            user_id: currentUser.userId,
+            availability_status: status,
+          }),
+          keepalive: true,
+        }).catch(() => {});
+      } catch {}
     };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "hidden") {
+        setPresence("OFFLINE");
+      } else if (document.visibilityState === "visible") {
+        setPresence("ONLINE");
+      }
+    };
+
+    const handleUnload = () => {
+      setPresence("OFFLINE");
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("pagehide", handleUnload);
     window.addEventListener("beforeunload", handleUnload);
-    return () => window.removeEventListener("beforeunload", handleUnload);
+
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("pagehide", handleUnload);
+      window.removeEventListener("beforeunload", handleUnload);
+    };
   }, [currentUser]);
 
   // Logout Handler
