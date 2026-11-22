@@ -1,0 +1,393 @@
+from datetime import datetime, timedelta
+from typing import List, Optional
+from pydantic import BaseModel
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy.orm import Session
+from sqlalchemy import or_, and_
+
+from app.core.database import get_db
+from app.models.client import ClientUser
+from app.models.chat import InternalChatMessage
+
+router = APIRouter(prefix="/api/client", tags=["Internal Portal Chat"])
+
+
+# ---------------- SCHEMAS ----------------
+class SendMessageRequest(BaseModel):
+    channel_type: str = "GENERAL"  # GENERAL or DIRECT
+    sender_id: int
+    sender_name: str
+    sender_role: str
+    recipient_id: Optional[int] = None
+    content: str
+
+
+class UpdateAvailabilityRequest(BaseModel):
+    user_id: int
+    availability_status: str  # ONLINE, LUNCH, OFF_DUTY, BREAK, OUTSIDE, NOT_AVAILABLE
+    not_available_from: Optional[str] = None
+    not_available_to: Optional[str] = None
+    not_available_reason: Optional[str] = None
+
+
+class UpdateDisappearingSettingRequest(BaseModel):
+    user_id: int
+    ttl: str  # OFF, 24H, 7D, 30D
+
+
+class TypingStatusRequest(BaseModel):
+    sender_id: int
+    recipient_id: int
+    is_typing: bool
+
+
+# Active typing tracking: key=(sender_id, recipient_id), value=datetime
+typing_sessions = {}
+
+
+def purge_expired_messages(client_id: int, ttl: str, db: Session):
+    """
+    Enforces strict privacy and auto-disappearing chat policy.
+    Purges messages older than the configured TTL.
+    """
+    if ttl == "OFF" or not ttl:
+        return
+    now = datetime.utcnow()
+    cutoff = None
+    if ttl == "24H":
+        cutoff = now - timedelta(hours=24)
+    elif ttl == "7D":
+        cutoff = now - timedelta(days=7)
+    elif ttl == "30D":
+        cutoff = now - timedelta(days=30)
+
+    if cutoff:
+        db.query(InternalChatMessage).filter(
+            InternalChatMessage.client_id == client_id,
+            InternalChatMessage.portal_type == "CLIENT",
+            InternalChatMessage.created_at < cutoff,
+        ).delete(synchronize_session=False)
+        db.commit()
+
+
+def serialize_message(m: InternalChatMessage):
+    return {
+        "id": m.id,
+        "client_id": m.client_id,
+        "portal_type": m.portal_type,
+        "channel_type": m.channel_type,
+        "sender_id": m.sender_id,
+        "sender_name": m.sender_name,
+        "sender_role": m.sender_role,
+        "recipient_id": m.recipient_id,
+        "recipient_name": m.recipient_name,
+        "content": m.content,
+        "created_at": m.created_at.isoformat() if m.created_at else None,
+        "time_str": m.created_at.strftime("%H:%M") if m.created_at else "",
+        "date_str": m.created_at.strftime("%d %b") if m.created_at else "",
+        "is_read": m.is_read,
+    }
+
+
+# ---------------- ENDPOINTS ----------------
+@router.get("/{client_id}/chat/users")
+def get_internal_chat_users(
+    client_id: int,
+    current_user_id: Optional[int] = Query(None),
+    db: Session = Depends(get_db),
+):
+    """
+    STRICT PORTAL PRIVACY:
+    Returns ONLY real users belonging to this client company.
+    Completely excludes Agency and Candidate/Employee users. Zero dummy users generated.
+    """
+    users = (
+        db.query(ClientUser)
+        .filter(ClientUser.client_id == client_id)
+        .order_by(ClientUser.id.asc())
+        .all()
+    )
+
+    # Get current user's disappearing TTL
+    current_user = next((u for u in users if current_user_id and u.id == current_user_id), None)
+    active_ttl = current_user.disappearing_messages_ttl if current_user and current_user.disappearing_messages_ttl else "OFF"
+
+    # Enforce auto-disappearing purge if active
+    if active_ttl != "OFF":
+        purge_expired_messages(client_id, active_ttl, db)
+
+    result = []
+    for u in users:
+        unread_count = 0
+        if current_user_id and u.id != current_user_id:
+            unread_count = (
+                db.query(InternalChatMessage)
+                .filter(
+                    InternalChatMessage.client_id == client_id,
+                    InternalChatMessage.portal_type == "CLIENT",
+                    InternalChatMessage.channel_type == "DIRECT",
+                    InternalChatMessage.sender_id == u.id,
+                    InternalChatMessage.recipient_id == current_user_id,
+                    InternalChatMessage.is_read == False,
+                )
+                .count()
+            )
+
+        last_msg = None
+        if current_user_id and u.id != current_user_id:
+            last_msg_obj = (
+                db.query(InternalChatMessage)
+                .filter(
+                    InternalChatMessage.client_id == client_id,
+                    InternalChatMessage.portal_type == "CLIENT",
+                    InternalChatMessage.channel_type == "DIRECT",
+                    or_(
+                        and_(
+                            InternalChatMessage.sender_id == current_user_id,
+                            InternalChatMessage.recipient_id == u.id,
+                        ),
+                        and_(
+                            InternalChatMessage.sender_id == u.id,
+                            InternalChatMessage.recipient_id == current_user_id,
+                        ),
+                    ),
+                )
+                .order_by(InternalChatMessage.id.desc())
+                .first()
+            )
+            if last_msg_obj:
+                last_msg = {
+                    "content": last_msg_obj.content[:35],
+                    "time_str": last_msg_obj.created_at.strftime("%H:%M") if last_msg_obj.created_at else "",
+                }
+
+        # Determine effective availability: if user is not active or offline, status is OFFLINE
+        raw_status = getattr(u, "availability_status", "OFFLINE") or "OFFLINE"
+        effective_status = "OFFLINE" if (not u.is_active or raw_status.upper() == "OFFLINE") else raw_status.upper()
+
+        result.append(
+            {
+                "id": u.id,
+                "full_name": u.full_name,
+                "role": u.role,
+                "email": u.email,
+                "is_active": u.is_active,
+                "assigned_site_ids": u.assigned_site_ids or "*",
+                "availability_status": effective_status,
+                "not_available_from": getattr(u, "not_available_from", None),
+                "not_available_to": getattr(u, "not_available_to", None),
+                "not_available_reason": getattr(u, "not_available_reason", None),
+                "disappearing_messages_ttl": getattr(u, "disappearing_messages_ttl", "OFF") or "OFF",
+                "unread_count": unread_count,
+                "last_message": last_msg,
+            }
+        )
+
+    # General channel count
+    general_count = (
+        db.query(InternalChatMessage)
+        .filter(
+            InternalChatMessage.client_id == client_id,
+            InternalChatMessage.portal_type == "CLIENT",
+            InternalChatMessage.channel_type == "GENERAL",
+        )
+        .count()
+    )
+
+    return {
+        "client_id": client_id,
+        "portal": "CLIENT",
+        "users": result,
+        "disappearing_ttl": active_ttl,
+        "general_total_messages": general_count,
+    }
+
+
+@router.patch("/{client_id}/chat/availability")
+def update_user_availability(
+    client_id: int,
+    payload: UpdateAvailabilityRequest,
+    db: Session = Depends(get_db),
+):
+    user = (
+        db.query(ClientUser)
+        .filter(ClientUser.id == payload.user_id, ClientUser.client_id == client_id)
+        .first()
+    )
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    user.availability_status = payload.availability_status.strip().upper()
+    if payload.availability_status.strip().upper() == "NOT_AVAILABLE":
+        user.not_available_from = payload.not_available_from
+        user.not_available_to = payload.not_available_to
+        user.not_available_reason = payload.not_available_reason
+    else:
+        user.not_available_from = None
+        user.not_available_to = None
+        user.not_available_reason = None
+
+    db.commit()
+    db.refresh(user)
+    return {
+        "status": "UPDATED",
+        "user_id": user.id,
+        "availability_status": user.availability_status,
+        "not_available_from": user.not_available_from,
+        "not_available_to": user.not_available_to,
+        "not_available_reason": user.not_available_reason,
+    }
+
+
+@router.patch("/{client_id}/chat/disappearing-setting")
+def update_disappearing_setting(
+    client_id: int,
+    payload: UpdateDisappearingSettingRequest,
+    db: Session = Depends(get_db),
+):
+    user = (
+        db.query(ClientUser)
+        .filter(ClientUser.id == payload.user_id, ClientUser.client_id == client_id)
+        .first()
+    )
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    ttl = payload.ttl.strip().upper()
+    if ttl not in ("OFF", "24H", "7D", "30D"):
+        raise HTTPException(status_code=400, detail="Invalid TTL. Allowed: OFF, 24H, 7D, 30D")
+
+    user.disappearing_messages_ttl = ttl
+    db.commit()
+    db.refresh(user)
+
+    if ttl != "OFF":
+        purge_expired_messages(client_id, ttl, db)
+
+    return {"status": "UPDATED", "user_id": user.id, "disappearing_ttl": ttl}
+
+
+@router.post("/{client_id}/chat/typing")
+def set_typing_status(
+    client_id: int,
+    payload: TypingStatusRequest,
+):
+    key = (payload.sender_id, payload.recipient_id)
+    if payload.is_typing:
+        typing_sessions[key] = datetime.utcnow()
+    else:
+        typing_sessions.pop(key, None)
+    return {"status": "OK"}
+
+
+@router.get("/{client_id}/chat/messages")
+def get_internal_chat_messages(
+    client_id: int,
+    channel_type: str = Query("GENERAL"),
+    user_id: Optional[int] = Query(None),
+    peer_id: Optional[int] = Query(None),
+    limit: int = Query(60),
+    db: Session = Depends(get_db),
+):
+    """
+    STRICT PORTAL SCOPE:
+    Fetches message thread for either the Plant General channel or 1-on-1 Direct Chat between internal client users.
+    """
+    query = db.query(InternalChatMessage).filter(
+        InternalChatMessage.client_id == client_id,
+        InternalChatMessage.portal_type == "CLIENT",
+        InternalChatMessage.channel_type == channel_type,
+    )
+
+    is_peer_typing = False
+    if channel_type == "DIRECT":
+        if not user_id or not peer_id:
+            raise HTTPException(status_code=400, detail="user_id and peer_id required for DIRECT chat")
+        query = query.filter(
+            or_(
+                and_(
+                    InternalChatMessage.sender_id == user_id,
+                    InternalChatMessage.recipient_id == peer_id,
+                ),
+                and_(
+                    InternalChatMessage.sender_id == peer_id,
+                    InternalChatMessage.recipient_id == user_id,
+                ),
+            )
+        )
+        # Check typing status
+        peer_typing_time = typing_sessions.get((peer_id, user_id))
+        if peer_typing_time and (datetime.utcnow() - peer_typing_time).total_seconds() < 4.0:
+            is_peer_typing = True
+
+        # Mark messages sent from peer to user as read
+        db.query(InternalChatMessage).filter(
+            InternalChatMessage.client_id == client_id,
+            InternalChatMessage.portal_type == "CLIENT",
+            InternalChatMessage.channel_type == "DIRECT",
+            InternalChatMessage.sender_id == peer_id,
+            InternalChatMessage.recipient_id == user_id,
+            InternalChatMessage.is_read == False,
+        ).update({"is_read": True}, synchronize_session=False)
+        db.commit()
+
+    messages = query.order_by(InternalChatMessage.id.asc()).limit(limit).all()
+    return {
+        "client_id": client_id,
+        "portal": "CLIENT",
+        "channel_type": channel_type,
+        "messages": [serialize_message(m) for m in messages],
+        "is_peer_typing": is_peer_typing,
+    }
+
+
+@router.post("/{client_id}/chat/messages")
+def send_internal_chat_message(
+    client_id: int,
+    payload: SendMessageRequest,
+    db: Session = Depends(get_db),
+):
+    """
+    Sends an internal portal message. Strictly verifies client scoping.
+    """
+    sender = (
+        db.query(ClientUser)
+        .filter(ClientUser.id == payload.sender_id, ClientUser.client_id == client_id)
+        .first()
+    )
+    if not sender:
+        raise HTTPException(status_code=403, detail="Sender does not belong to this client organization.")
+
+    recipient_name = None
+    if payload.channel_type == "DIRECT":
+        if not payload.recipient_id:
+            raise HTTPException(status_code=400, detail="recipient_id required for DIRECT chat")
+        recipient = (
+            db.query(ClientUser)
+            .filter(ClientUser.id == payload.recipient_id, ClientUser.client_id == client_id)
+            .first()
+        )
+        if not recipient:
+            raise HTTPException(status_code=404, detail="Recipient not found in this client organization.")
+        recipient_name = recipient.full_name
+        # Clear typing on message send
+        typing_sessions.pop((payload.sender_id, payload.recipient_id), None)
+
+    new_msg = InternalChatMessage(
+        client_id=client_id,
+        portal_type="CLIENT",
+        channel_type=payload.channel_type,
+        sender_id=sender.id,
+        sender_name=sender.full_name,
+        sender_role=payload.sender_role or sender.role,
+        recipient_id=payload.recipient_id,
+        recipient_name=recipient_name,
+        content=payload.content.strip(),
+        created_at=datetime.utcnow(),
+        is_read=False,
+    )
+    db.add(new_msg)
+    db.commit()
+    db.refresh(new_msg)
+
+    return serialize_message(new_msg)
