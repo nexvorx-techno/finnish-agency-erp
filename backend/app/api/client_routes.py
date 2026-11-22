@@ -3,6 +3,7 @@ from datetime import datetime, date, time
 from typing import List, Optional
 from pydantic import BaseModel
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import or_, and_
 from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.models.client import (

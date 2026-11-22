@@ -1,6 +1,6 @@
 // SuomiStaff Finnish Agency ERP — PWA Service Worker
 // Bump CACHE_VERSION whenever a new release is deployed to trigger the in-app PWA update notification.
-const CACHE_VERSION = "agency-erp-v2.6.1";
+const CACHE_VERSION = "agency-erp-v3.1.0";
 const APP_SHELL = ["/", "/manifest.json", "/icons/icon-192.png", "/icons/icon-512.png"];
 
 self.addEventListener("install", (event) => {
@@ -38,7 +38,8 @@ self.addEventListener("fetch", (event) => {
     url.pathname.startsWith("/api/") ||
     url.port === "8000" ||
     url.hostname.includes("open-meteo.com") ||
-    url.hostname.includes("bigdatacloud.net")
+    url.hostname.includes("bigdatacloud.net") ||
+    url.hostname.includes("onrender.com")
   ) {
     return;
   }
