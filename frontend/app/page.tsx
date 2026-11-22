@@ -641,19 +641,19 @@ export default function ClientPortalPage() {
 
       {/* Mobile Slide-Over Drawer for Tablets & Mobile (< 1024px) */}
       {isMobileMenuOpen && (
-        <div className="fixed inset-0 z-50 lg:hidden flex">
+        <div className="fixed inset-0 z-[100] lg:hidden flex">
           {/* Dark Backdrop */}
           <div
             className="fixed inset-0 bg-black/60 backdrop-blur-xs transition-opacity"
             onClick={() => setIsMobileMenuOpen(false)}
           />
           {/* Drawer Canvas */}
-          <div className="relative w-72 sm:w-80 max-w-[85vw] h-full bg-[var(--bg-sidebar)] shadow-2xl z-10 flex flex-col animate-in slide-in-from-left duration-200">
+          <div className="relative w-80 max-w-[85vw] h-full bg-[var(--bg-sidebar)] shadow-2xl z-[101] flex flex-col animate-in slide-in-from-left duration-200">
             <div className="absolute top-3.5 right-3.5 z-20">
               <button
                 type="button"
                 onClick={() => setIsMobileMenuOpen(false)}
-                className="p-1.5 rounded-xl bg-[var(--bg-secondary)] border border-[var(--border-color)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] cursor-pointer"
+                className="p-1.5 rounded-xl bg-[var(--bg-secondary)] border border-[var(--border-color)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] cursor-pointer shadow-xs"
                 title="Close Navigation"
               >
                 <X className="w-4 h-4" />
@@ -705,7 +705,7 @@ export default function ClientPortalPage() {
         />
 
         {/* Scrollable Canvas */}
-        <main className={`flex-1 overflow-y-auto p-3.5 sm:p-6 lg:p-8 transition-colors ${menuPosition === "bottom" ? "pb-32" : ""}`}>
+        <main className={`flex-1 overflow-y-auto p-3.5 sm:p-6 lg:p-8 transition-colors ${menuPosition === "bottom" ? "lg:pb-32 pb-6" : ""}`}>
           {activeModule === "dashboard" ? (
             <ClientDashboard
               clientId={currentUser.clientId}
@@ -835,18 +835,20 @@ export default function ClientPortalPage() {
         currentUser={currentUser}
       />
 
-      {/* 4. Bottom Side Bar (Rendered when menuPosition === 'bottom') */}
+      {/* 4. Bottom Side Bar (Rendered when menuPosition === 'bottom' on desktop only) */}
       {menuPosition === "bottom" && (
-        <BottomNavBar
-          activeModule={activeModule}
-          setActiveModule={navigateToModule}
-          onOpenPreferences={() => setIsPreferencesOpen(true)}
-          onOpenProfile={() => setIsProfileOpen(true)}
-          onLogout={handleLogout}
-          companyName={summary.client_name}
-          userName={currentUser.fullName}
-          avatarUrl={currentUser.avatarUrl}
-        />
+        <div className="hidden lg:block">
+          <BottomNavBar
+            activeModule={activeModule}
+            setActiveModule={navigateToModule}
+            onOpenPreferences={() => setIsPreferencesOpen(true)}
+            onOpenProfile={() => setIsProfileOpen(true)}
+            onLogout={handleLogout}
+            companyName={summary.client_name}
+            userName={currentUser.fullName}
+            avatarUrl={currentUser.avatarUrl}
+          />
+        </div>
       )}
 
       {/* Mandatory First-Time Password Change Modal */}

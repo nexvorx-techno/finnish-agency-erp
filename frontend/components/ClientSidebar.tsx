@@ -334,12 +334,12 @@ export const ClientSidebar: React.FC<ClientSidebarProps> = ({
   return (
     <aside
       ref={sidebarRef}
-      className="w-72 h-screen shrink-0 border-r border-[var(--border-color)] bg-[var(--bg-sidebar)] flex flex-col justify-between select-none text-[var(--text-primary)] transition-all"
+      className="w-full lg:w-72 h-full lg:h-screen shrink-0 border-r border-[var(--border-color)] bg-[var(--bg-sidebar)] flex flex-col justify-between select-none text-[var(--text-primary)] transition-all overflow-hidden"
     >
       {/* 1. TOP BRANDING & CLIENT CONTEXT */}
-      <div>
+      <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
         {/* Main Logo & Platform Label */}
-        <div className="px-5 py-4 border-b border-[var(--border-color)]">
+        <div className="px-5 py-4 border-b border-[var(--border-color)] shrink-0">
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-blue-600 to-indigo-700 text-white flex items-center justify-center font-black text-base shadow-sm">
               S
@@ -371,7 +371,7 @@ export const ClientSidebar: React.FC<ClientSidebarProps> = ({
         </div>
 
         {/* 2. ENTERPRISE NAVIGATION ACCORDION */}
-        <nav className="p-3 space-y-1 overflow-y-auto max-h-[calc(100vh-230px)] scrollbar-thin">
+        <nav className="p-3 space-y-1 overflow-y-auto flex-1 scrollbar-thin">
           {/* Top Dashboard Summary Button */}
           <div className="mb-2">
             <button
