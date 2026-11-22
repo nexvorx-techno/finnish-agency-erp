@@ -11,7 +11,8 @@ import {
   CheckCheck,
   Workflow,
   Check,
-  ShieldCheck
+  ShieldCheck,
+  Menu,
 } from "lucide-react";
 
 export interface NotificationItem {
@@ -33,6 +34,7 @@ interface ClientHeaderProps {
   canGoBack?: boolean;
   onNavigateBack?: () => void;
   onNavigateToDashboard?: () => void;
+  onToggleMobileMenu?: () => void;
   activeTab?: string;
   setActiveTab?: (tab: string) => void;
   selectedSite: string;
@@ -53,6 +55,7 @@ export const ClientHeader: React.FC<ClientHeaderProps> = ({
   activeModule,
   canGoBack,
   onNavigateBack,
+  onToggleMobileMenu,
   selectedSite,
   setSelectedSite,
   sites,
@@ -218,25 +221,37 @@ export const ClientHeader: React.FC<ClientHeaderProps> = ({
   };
 
   return (
-    <header className="sticky top-0 z-30 w-full border-b border-[var(--border-color)] bg-[var(--bg-header)] backdrop-blur-md px-6 py-2.5 transition-colors">
-      <div className="flex items-center justify-between gap-4">
-        {/* Left: Global Back Button, Module Breadcrumb & Site Selection */}
-        <div className="flex items-center gap-3">
+    <header className="sticky top-0 z-30 w-full border-b border-[var(--border-color)] bg-[var(--bg-header)] backdrop-blur-md px-3 sm:px-6 py-2.5 transition-colors">
+      <div className="flex items-center justify-between gap-2 sm:gap-4">
+        {/* Left: Mobile Menu, Global Back Button, Module Breadcrumb & Site Selection */}
+        <div className="flex items-center gap-1.5 sm:gap-3 min-w-0">
+          {/* Mobile Hamburger Drawer Toggle (Mobile & Tablet) */}
+          {onToggleMobileMenu && (
+            <button
+              type="button"
+              onClick={onToggleMobileMenu}
+              title="Open Navigation Menu"
+              className="lg:hidden p-2 rounded-xl border border-[var(--border-color)] bg-[var(--bg-card)] text-[var(--text-primary)] hover:bg-[var(--bg-secondary)] hover:border-[var(--accent-color)] transition-all shadow-sm active:scale-95 cursor-pointer shrink-0"
+            >
+              <Menu className="w-4 h-4 text-[var(--accent-color)]" />
+            </button>
+          )}
+
           {canGoBack && onNavigateBack && (
             <button
               type="button"
               onClick={onNavigateBack}
               title="Go to previous page"
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-[var(--border-color)] bg-[var(--bg-card)] hover:bg-[var(--bg-secondary)] hover:border-[var(--accent-color)] text-xs font-bold text-[var(--text-primary)] transition-all shadow-sm active:scale-95 group cursor-pointer"
+              className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl border border-[var(--border-color)] bg-[var(--bg-card)] hover:bg-[var(--bg-secondary)] hover:border-[var(--accent-color)] text-xs font-bold text-[var(--text-primary)] transition-all shadow-sm active:scale-95 group cursor-pointer shrink-0"
             >
               <ArrowLeft className="w-3.5 h-3.5 text-[var(--accent-color)] transition-transform group-hover:-translate-x-0.5" />
-              <span>Back</span>
+              <span className="hidden xs:inline">Back</span>
             </button>
           )}
 
           {activeModule !== "dashboard" && (
-            <div className="hidden sm:flex items-center gap-2 text-xs text-[var(--text-secondary)] font-medium">
-              <span className="font-bold text-[var(--text-primary)] truncate max-w-[260px]">
+            <div className="hidden md:flex items-center gap-2 text-xs text-[var(--text-secondary)] font-medium">
+              <span className="font-bold text-[var(--text-primary)] truncate max-w-[200px] lg:max-w-[260px]">
                 {getBreadcrumbTitle(activeModule)}
               </span>
               <div className="h-4 w-px bg-[var(--border-color)] mx-1" />
@@ -244,16 +259,16 @@ export const ClientHeader: React.FC<ClientHeaderProps> = ({
           )}
 
           {/* 1. Site Context Pill (Dropdown ONLY for multi-site users; static badge for single-site users) */}
-          <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-[var(--bg-card)] border border-[var(--border-color)] shadow-sm">
+          <div className="flex items-center gap-1.5 sm:gap-2 px-2 sm:px-3 py-1.5 rounded-xl bg-[var(--bg-card)] border border-[var(--border-color)] shadow-sm shrink min-w-0 max-w-[130px] sm:max-w-none">
             <Building className="w-3.5 h-3.5 text-[var(--accent-color)] shrink-0" />
             {(canSwitchSite ?? sites.length > 1) ? (
               <select
                 value={selectedSite}
                 onChange={(e) => setSelectedSite(e.target.value)}
-                className="bg-transparent text-xs font-semibold text-[var(--text-primary)] focus:outline-none cursor-pointer"
+                className="bg-transparent text-xs font-semibold text-[var(--text-primary)] focus:outline-none cursor-pointer truncate w-full"
               >
                 <option value="all">
-                  All Assigned Sites ({sites.map((s) => s.site_code).join(", ")})
+                  All Sites ({sites.map((s) => s.site_code).join(", ")})
                 </option>
                 {sites.map((s) => (
                   <option key={s.id} value={s.id.toString()}>
@@ -262,10 +277,10 @@ export const ClientHeader: React.FC<ClientHeaderProps> = ({
                 ))}
               </select>
             ) : (
-              <span className="text-xs font-semibold text-[var(--text-primary)] truncate max-w-[220px] sm:max-w-none">
+              <span className="text-xs font-semibold text-[var(--text-primary)] truncate">
                 {sites[0]
                   ? `${sites[0].site_code} — ${sites[0].site_name}`
-                  : "Assigned Plant Site"}
+                  : "Assigned Plant"}
               </span>
             )}
           </div>
@@ -354,7 +369,7 @@ export const ClientHeader: React.FC<ClientHeaderProps> = ({
 
             {/* Notification Popover Dropdown */}
             {isNotifOpen && (
-              <div className="absolute right-0 top-full mt-2 w-80 sm:w-96 rounded-2xl bg-[var(--bg-card)] border border-[var(--border-color)] shadow-2xl z-50 overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+              <div className="absolute right-0 top-full mt-2 w-[calc(100vw-1.5rem)] sm:w-96 max-w-sm rounded-2xl bg-[var(--bg-card)] border border-[var(--border-color)] shadow-2xl z-50 overflow-hidden animate-in fade-in zoom-in-95 duration-150">
                 {/* Header */}
                 <div className="p-3.5 border-b border-[var(--border-color)] bg-[var(--bg-secondary)] flex items-center justify-between">
                   <div className="flex items-center gap-2">

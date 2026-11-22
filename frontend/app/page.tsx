@@ -18,7 +18,7 @@ import { MasterDataModule, MasterSubTab } from "../components/MasterDataModule";
 import { ShiftPlanningModule, RosterSubTab } from "../components/ShiftPlanningModule";
 import { UserProfileModal } from "../components/UserProfileModal";
 import { GlobalLoader } from "../components/GlobalLoader";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, X } from "lucide-react";
 
 export interface WorkerItem {
   worker_id: number;
@@ -132,6 +132,7 @@ export default function ClientPortalPage() {
 
   const [activeModule, setActiveModuleState] = useState("dashboard");
   const [navHistory, setNavHistory] = useState<string[]>(["dashboard"]);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isLoadingOverlay, setIsLoadingOverlay] = useState(false);
   const [isInitialLoading, setIsInitialLoading] = useState(true);
   const loaderTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -155,6 +156,7 @@ export default function ClientPortalPage() {
   }, []);
 
   const navigateToModule = (newModule: string) => {
+    setIsMobileMenuOpen(false);
     if (newModule !== activeModule) {
       triggerLoader(600);
       setNavHistory((prev) => [...prev, newModule]);
@@ -622,27 +624,72 @@ export default function ClientPortalPage() {
   // 2. IF AUTHENTICATED: Display the Full 3-Pane Client Portal Workspace
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-[var(--bg-primary)]">
-      {/* 1. Left Sidebar (Rendered when menuPosition === 'left') */}
+      {/* 1. Left Sidebar for Desktop (Rendered when menuPosition === 'left') */}
       {menuPosition === "left" && (
-        <ClientSidebar
-          activeModule={activeModule}
-          setActiveModule={navigateToModule}
-          onOpenPreferences={() => setIsPreferencesOpen(true)}
-          onOpenProfile={() => setIsProfileOpen(true)}
-          onLogout={handleLogout}
-          companyName={summary.client_name}
-          currentUser={currentUser}
-        />
+        <div className="hidden lg:flex shrink-0">
+          <ClientSidebar
+            activeModule={activeModule}
+            setActiveModule={navigateToModule}
+            onOpenPreferences={() => setIsPreferencesOpen(true)}
+            onOpenProfile={() => setIsProfileOpen(true)}
+            onLogout={handleLogout}
+            companyName={summary.client_name}
+            currentUser={currentUser}
+          />
+        </div>
+      )}
+
+      {/* Mobile Slide-Over Drawer for Tablets & Mobile (< 1024px) */}
+      {isMobileMenuOpen && (
+        <div className="fixed inset-0 z-50 lg:hidden flex">
+          {/* Dark Backdrop */}
+          <div
+            className="fixed inset-0 bg-black/60 backdrop-blur-xs transition-opacity"
+            onClick={() => setIsMobileMenuOpen(false)}
+          />
+          {/* Drawer Canvas */}
+          <div className="relative w-72 sm:w-80 max-w-[85vw] h-full bg-[var(--bg-sidebar)] shadow-2xl z-10 flex flex-col animate-in slide-in-from-left duration-200">
+            <div className="absolute top-3.5 right-3.5 z-20">
+              <button
+                type="button"
+                onClick={() => setIsMobileMenuOpen(false)}
+                className="p-1.5 rounded-xl bg-[var(--bg-secondary)] border border-[var(--border-color)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] cursor-pointer"
+                title="Close Navigation"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <ClientSidebar
+              activeModule={activeModule}
+              setActiveModule={(mod) => {
+                navigateToModule(mod);
+                setIsMobileMenuOpen(false);
+              }}
+              onOpenPreferences={() => {
+                setIsPreferencesOpen(true);
+                setIsMobileMenuOpen(false);
+              }}
+              onOpenProfile={() => {
+                setIsProfileOpen(true);
+                setIsMobileMenuOpen(false);
+              }}
+              onLogout={handleLogout}
+              companyName={summary.client_name}
+              currentUser={currentUser}
+            />
+          </div>
+        </div>
       )}
 
       {/* 2. Main Area (Header + Canvas) */}
       <div className="flex-1 flex flex-col min-w-0 h-screen overflow-hidden">
-        {/* Top Header with Back / Dashboard Navigation Controls */}
+        {/* Top Header with Back / Dashboard Navigation Controls & Mobile Menu Toggle */}
         <ClientHeader
           activeModule={activeModule}
           canGoBack={navHistory.length > 1 || activeModule !== "dashboard"}
           onNavigateBack={handleNavigateBack}
           onNavigateToDashboard={handleNavigateToDashboard}
+          onToggleMobileMenu={() => setIsMobileMenuOpen((prev) => !prev)}
           activeTab={activeTab}
           setActiveTab={setActiveTab}
           selectedSite={selectedSite}
@@ -658,7 +705,7 @@ export default function ClientPortalPage() {
         />
 
         {/* Scrollable Canvas */}
-        <main className={`flex-1 overflow-y-auto p-6 transition-colors ${menuPosition === "bottom" ? "pb-32" : ""}`}>
+        <main className={`flex-1 overflow-y-auto p-3.5 sm:p-6 lg:p-8 transition-colors ${menuPosition === "bottom" ? "pb-32" : ""}`}>
           {activeModule === "dashboard" ? (
             <ClientDashboard
               clientId={currentUser.clientId}

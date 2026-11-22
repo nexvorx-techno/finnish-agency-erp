@@ -471,7 +471,7 @@ export const DashboardClockAndWeather: React.FC = () => {
 
         {/* WEATHER DROPDOWN: REAL-TIME SEARCH + LAST 5 RECENTS + GPS AUTO */}
         {isWeatherMenuOpen && (
-          <div className="absolute right-0 sm:left-0 sm:right-auto top-full mt-2 w-80 sm:w-88 rounded-2xl bg-[var(--bg-card)] border border-[var(--border-color)] shadow-2xl z-50 p-3 space-y-2.5 animate-in fade-in zoom-in-95 duration-150 backdrop-blur-md">
+          <div className="absolute right-0 sm:left-0 sm:right-auto top-full mt-2 w-[calc(100vw-2rem)] sm:w-88 max-w-sm rounded-2xl bg-[var(--bg-card)] border border-[var(--border-color)] shadow-2xl z-50 p-3 space-y-2.5 animate-in fade-in zoom-in-95 duration-150 backdrop-blur-md">
             {/* Header + GPS Button */}
             <div className="flex items-center justify-between pb-2 border-b border-[var(--border-color)]">
               <div className="text-xs font-black uppercase tracking-wider text-[var(--text-primary)] flex items-center gap-1.5">
@@ -836,7 +836,7 @@ export const DashboardClockAndWeather: React.FC = () => {
 
         {/* CLOCK SETTINGS & WORLD CLOCK DROPDOWN */}
         {isClockMenuOpen && (
-          <div className="absolute right-0 top-full mt-2 w-80 rounded-2xl bg-[var(--bg-card)] border border-[var(--border-color)] shadow-2xl z-50 p-3 space-y-3 animate-in fade-in zoom-in-95 duration-150 backdrop-blur-md">
+          <div className="absolute right-0 top-full mt-2 w-[calc(100vw-2rem)] sm:w-80 max-w-sm rounded-2xl bg-[var(--bg-card)] border border-[var(--border-color)] shadow-2xl z-50 p-3 space-y-3 animate-in fade-in zoom-in-95 duration-150 backdrop-blur-md">
             {/* Section 1: Choose Clock Design */}
             <div>
               <div className="px-1 text-[10px] font-black uppercase tracking-wider text-[var(--text-secondary)] mb-1.5 flex items-center justify-between">

@@ -539,10 +539,10 @@ export const RightRail: React.FC<RightRailProps> = ({
       {/* =================================================================== */}
       {/* 1. MODERN DOCKED MESSAGING BAR & DRAWER (Fixed at Bottom-Right)      */}
       {/* =================================================================== */}
-      <div ref={drawerRef} className="fixed bottom-4 right-5 z-[75] select-none flex flex-col items-end">
+      <div ref={drawerRef} className="fixed bottom-4 right-3 sm:right-5 z-[75] select-none flex flex-col items-end max-w-[calc(100vw-1.5rem)]">
         {/* EXPANDED MESSAGING DRAWER */}
         {isDrawerOpen && (
-          <div className="w-80 sm:w-88 h-[490px] mb-2 rounded-2xl bg-[var(--bg-card)] border border-[var(--border-color)] shadow-2xl flex flex-col overflow-hidden animate-in fade-in slide-in-from-bottom-3 duration-200">
+          <div className="w-[calc(100vw-1.5rem)] sm:w-88 max-w-sm h-[490px] mb-2 rounded-2xl bg-[var(--bg-card)] border border-[var(--border-color)] shadow-2xl flex flex-col overflow-hidden animate-in fade-in slide-in-from-bottom-3 duration-200">
             {/* Header: Streamlined with Team Chat, inline Status Selector, and One Auto-disappear icon */}
             <div className="p-2.5 border-b border-[var(--border-color)] bg-[var(--bg-secondary)] shrink-0">
               <div className="flex items-center justify-between gap-1.5">
@@ -796,12 +796,12 @@ export const RightRail: React.FC<RightRailProps> = ({
           ref={chatBoxRef}
           className={`fixed transition-all duration-300 shadow-2xl rounded-2xl border border-[var(--border-color)] bg-[var(--bg-card)] z-[80] ${
             isDrawerOpen
-              ? "right-88 sm:right-96 bottom-4"
+              ? "right-3 sm:right-88 lg:right-96 bottom-4"
               : floatingChat.isMinimized
-              ? "right-5 bottom-[68px]"
-              : "right-5 bottom-4"
+              ? "right-3 sm:right-5 bottom-[68px]"
+              : "right-3 sm:right-5 bottom-4"
           } ${
-            floatingChat.isMinimized ? "w-72 h-11" : "w-80 sm:w-92 h-[490px] flex flex-col"
+            floatingChat.isMinimized ? "w-64 sm:w-72 h-11" : "w-[calc(100vw-1.5rem)] sm:w-92 max-w-sm h-[490px] flex flex-col"
           }`}
         >
           {/* Floating Chat Header */}
