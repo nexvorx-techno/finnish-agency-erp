@@ -3,6 +3,7 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import {
   MessageSquare,
+  MessageCircle,
   Send,
   Users,
   X,
@@ -17,7 +18,6 @@ import {
   Moon,
   Car,
   Check,
-  ChevronUp,
   ChevronDown,
 } from "lucide-react";
 import { CurrentUser } from "../app/page";
@@ -470,13 +470,17 @@ export const RightRail: React.FC<RightRailProps> = ({
     } catch {}
   };
 
-  // Open LinkedIn Floating Chat Box (Direct 1-on-1)
+  // Open Floating Chat Box (Direct 1-on-1)
   const handleOpenFloatingChat = (peer: ChatUser) => {
     setFloatingChat({
       isOpen: true,
       isMinimized: false,
       peer,
     });
+    // On mobile devices, close the contact drawer so direct chat pops up with focus
+    if (typeof window !== "undefined" && window.innerWidth < 640) {
+      setIsDrawerOpen(false);
+    }
   };
 
   // Send Message inside LinkedIn Floating Chat Box
@@ -641,10 +645,10 @@ export const RightRail: React.FC<RightRailProps> = ({
                   <button
                     type="button"
                     onClick={() => setIsDrawerOpen(false)}
-                    title="Collapse Team Chat"
+                    title="Close Team Chat"
                     className="p-1.5 rounded-lg border border-[var(--border-color)] bg-[var(--bg-card)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-secondary)] cursor-pointer"
                   >
-                    <ChevronDown className="w-3.5 h-3.5" />
+                    <X className="w-3.5 h-3.5" />
                   </button>
                 </div>
               </div>
@@ -757,33 +761,33 @@ export const RightRail: React.FC<RightRailProps> = ({
           </div>
         )}
 
-        {/* COLLAPSED FLOATING MESSAGING PILL BUTTON (Bottom-Right Dock) */}
+        {/* MESSENGER-STYLE FLOATING CIRCULAR CHAT BUBBLE (Bottom-Right Dock) */}
         <button
           type="button"
           onClick={() => setIsDrawerOpen(!isDrawerOpen)}
-          className="px-4 py-2.5 rounded-full bg-[var(--bg-card)]/95 backdrop-blur-md border border-[var(--border-color)] shadow-xl hover:shadow-2xl flex items-center gap-2.5 cursor-pointer hover:scale-[1.02] transition-all"
+          title={isDrawerOpen ? "Close Team Chat" : "Open Team Chat"}
+          aria-label="Open Team Chat"
+          className="relative w-12 h-12 sm:w-14 sm:h-14 rounded-full bg-gradient-to-tr from-[var(--accent-color)] to-blue-600 hover:from-[var(--accent-color)] hover:to-indigo-600 text-white shadow-2xl hover:shadow-blue-500/40 flex items-center justify-center cursor-pointer hover:scale-105 active:scale-95 transition-all border-2 border-white dark:border-slate-800"
         >
-          <div className="relative flex items-center justify-center text-[var(--accent-color)]">
-            <MessageSquare className="w-4 h-4" />
-            {totalUnreadCount > 0 && (
-              <span className="absolute -top-1.5 -right-1.5 px-1 py-0.2 rounded-full text-[9px] font-bold bg-rose-500 text-white animate-pulse">
-                {totalUnreadCount}
-              </span>
-            )}
-          </div>
-          <span className="text-xs font-bold text-[var(--text-primary)]">
-            Team Chat
-          </span>
-          <div className="flex items-center gap-1 pl-1 border-l border-[var(--border-color)]">
-            <span className={`w-2 h-2 rounded-full ${myCfg.dotClass}`} />
-            <span className="text-[10px] font-medium text-[var(--text-secondary)]">
-              {myCfg.label}
-            </span>
-          </div>
           {isDrawerOpen ? (
-            <ChevronDown className="w-3.5 h-3.5 text-[var(--text-secondary)]" />
+            <X className="w-5 h-5 sm:w-6 sm:h-6 transition-transform duration-200" />
           ) : (
-            <ChevronUp className="w-3.5 h-3.5 text-[var(--text-secondary)]" />
+            <MessageCircle className="w-5 h-5 sm:w-6 sm:h-6 transition-transform duration-200" />
+          )}
+
+          {/* User Presence Status Indicator on the Bubble edge */}
+          {!isDrawerOpen && (
+            <span
+              className={`absolute bottom-0 right-0 w-3.5 h-3.5 rounded-full ${myCfg.dotClass} ring-2 ring-white dark:ring-slate-900 shadow-xs`}
+              title={`Your Status: ${myCfg.label}`}
+            />
+          )}
+
+          {/* Unread Message Badge */}
+          {!isDrawerOpen && totalUnreadCount > 0 && (
+            <span className="absolute -top-1 -right-1 px-1.5 py-0.5 rounded-full text-[10px] font-black bg-rose-500 text-white ring-2 ring-white dark:ring-slate-900 shadow-md animate-pulse">
+              {totalUnreadCount}
+            </span>
           )}
         </button>
       </div>

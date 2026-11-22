@@ -1,49 +1,12 @@
 "use client";
 
 import React, { useEffect, useState, useCallback } from "react";
-import { Download, RefreshCw, X, MonitorSmartphone } from "lucide-react";
-
-interface BeforeInstallPromptEvent extends Event {
-  prompt: () => Promise<void>;
-  userChoice: Promise<{ outcome: "accepted" | "dismissed"; platform: string }>;
-}
+import { RefreshCw, X } from "lucide-react";
 
 export const PwaManager: React.FC = () => {
-  const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
-  const [isInstalled, setIsInstalled] = useState(false);
-  const [showManualHint, setShowManualHint] = useState(false);
   const [waitingWorker, setWaitingWorker] = useState<ServiceWorker | null>(null);
   const [updateAvailable, setUpdateAvailable] = useState(false);
   const [isUpdating, setIsUpdating] = useState(false);
-
-  // Detect standalone installed mode & listen for install prompt
-  useEffect(() => {
-    const checkStandalone = () => {
-      const standalone =
-        window.matchMedia("(display-mode: standalone)").matches ||
-        (window.navigator as unknown as { standalone?: boolean }).standalone === true;
-      setIsInstalled(standalone);
-    };
-    checkStandalone();
-
-    const handleBeforeInstallPrompt = (e: Event) => {
-      e.preventDefault();
-      setDeferredPrompt(e as BeforeInstallPromptEvent);
-    };
-
-    const handleAppInstalled = () => {
-      setIsInstalled(true);
-      setDeferredPrompt(null);
-      setShowManualHint(false);
-    };
-
-    window.addEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
-    window.addEventListener("appinstalled", handleAppInstalled);
-    return () => {
-      window.removeEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
-      window.removeEventListener("appinstalled", handleAppInstalled);
-    };
-  }, []);
 
   // Register Service Worker & detect new app updates automatically
   useEffect(() => {
@@ -102,19 +65,6 @@ export const PwaManager: React.FC = () => {
     };
   }, []);
 
-  const handleInstallClick = useCallback(async () => {
-    if (deferredPrompt) {
-      await deferredPrompt.prompt();
-      const choice = await deferredPrompt.userChoice;
-      if (choice.outcome === "accepted") {
-        setIsInstalled(true);
-      }
-      setDeferredPrompt(null);
-    } else {
-      setShowManualHint((v) => !v);
-    }
-  }, [deferredPrompt]);
-
   const handleApplyUpdate = useCallback(() => {
     setIsUpdating(true);
     if (waitingWorker) {
@@ -163,43 +113,6 @@ export const PwaManager: React.FC = () => {
             className="text-[var(--text-secondary)] hover:text-[var(--text-primary)] cursor-pointer"
           >
             <X className="w-4 h-4" />
-          </button>
-        </div>
-      )}
-
-      {/* 2. ADD TO DESKTOP / INSTALL APP BUTTON (Shown on Web App until installed) */}
-      {!isInstalled && (
-        <div className="fixed bottom-4 left-4 z-[85] flex flex-col items-start gap-2">
-          {showManualHint && (
-            <div className="w-72 p-3.5 rounded-xl bg-[var(--bg-card)] border border-[var(--border-color)] shadow-xl text-xs space-y-1.5">
-              <div className="flex items-center justify-between">
-                <span className="font-bold text-[var(--text-primary)] flex items-center gap-1.5">
-                  <MonitorSmartphone className="w-3.5 h-3.5 text-[var(--accent-color)]" />
-                  <span>Add to Desktop / Home Screen</span>
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setShowManualHint(false)}
-                  className="text-[var(--text-secondary)] cursor-pointer"
-                >
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              </div>
-              <p className="text-[11px] text-[var(--text-secondary)] leading-relaxed">
-                <strong>Desktop (Chrome/Edge):</strong> Click the install icon in the address bar or Menu → <em>Save and Share → Install App</em>.<br />
-                <strong>iPhone / iPad:</strong> Tap <em>Share → Add to Home Screen</em>.
-              </p>
-            </div>
-          )}
-
-          <button
-            type="button"
-            onClick={handleInstallClick}
-            className="px-3.5 py-2 rounded-xl bg-[var(--bg-card)] hover:bg-[var(--accent-color)] hover:text-white border border-[var(--border-color)] hover:border-[var(--accent-color)] text-[var(--text-primary)] text-xs font-bold shadow-lg flex items-center gap-2 transition-all cursor-pointer"
-            title="Install Client Portal as a Desktop / Mobile App"
-          >
-            <Download className="w-3.5 h-3.5 text-[var(--accent-color)] group-hover:text-white" />
-            <span>Add to Desktop</span>
           </button>
         </div>
       )}
