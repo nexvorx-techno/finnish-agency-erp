@@ -72,7 +72,8 @@ def client_login(payload: ClientLoginRequest, db: Session = Depends(get_db)):
         assigned_site_ids=user.assigned_site_ids,
         must_change_password=bool(user.must_change_password),
         module_permissions=user.module_permissions or "{}",
-        token=f"suomi_session_tk_{user.id}_{int(datetime.utcnow().timestamp())}"
+        token=f"suomi_session_tk_{user.id}_{int(datetime.utcnow().timestamp())}",
+        avatar_url=getattr(user, "avatar_url", None),
     )
 
 
@@ -748,6 +749,7 @@ class OperationalUserUpdate(BaseModel):
     is_active: Optional[bool] = None
     availability_status: Optional[str] = None
     not_available_reason: Optional[str] = None
+    avatar_url: Optional[str] = None
 
 
 @router.get("/{client_id}/users")
@@ -851,6 +853,9 @@ def update_operational_user(
 
     if payload.full_name is not None:
         user.full_name = payload.full_name.strip()
+
+    if payload.avatar_url is not None:
+        user.avatar_url = payload.avatar_url
 
     if payload.email is not None and payload.email.strip():
         new_email = payload.email.strip().lower()

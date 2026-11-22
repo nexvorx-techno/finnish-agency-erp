@@ -19,6 +19,7 @@ import {
   Car,
   Check,
   ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 import { CurrentUser } from "../app/page";
 
@@ -40,6 +41,8 @@ interface ChatUser {
   role: string;
   email: string;
   assigned_site_ids: string;
+  avatar_url?: string | null;
+  last_seen_str?: string;
   is_active?: boolean;
   availability_status: AvailabilityType;
   not_available_from?: string | null;
@@ -780,8 +783,12 @@ export const RightRail: React.FC<RightRailProps> = ({
                         className="w-full p-2.5 rounded-xl border border-[var(--border-color)] bg-[var(--bg-card)] hover:bg-[var(--bg-secondary)] flex items-center justify-between transition-all cursor-pointer text-left group"
                       >
                         <div className="flex items-center gap-2.5 min-w-0">
-                          <div className="relative w-8 h-8 rounded-full bg-[var(--accent-color)]/10 text-[var(--accent-color)] font-bold text-xs flex items-center justify-center shrink-0">
-                            <span>{initials}</span>
+                          <div className="relative w-8 h-8 rounded-full bg-[var(--accent-color)]/10 text-[var(--accent-color)] font-bold text-xs flex items-center justify-center shrink-0 overflow-hidden">
+                            {u.avatar_url ? (
+                              <img src={u.avatar_url} alt={u.full_name} className="w-full h-full object-cover" />
+                            ) : (
+                              <span>{initials}</span>
+                            )}
                             <span
                               className={`absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full ${cfg.dotClass} ring-2 ring-white dark:ring-slate-900`}
                               title={cfg.label}
@@ -795,7 +802,14 @@ export const RightRail: React.FC<RightRailProps> = ({
                               </span>
                             </div>
                             <div className="text-[10px] text-[var(--text-secondary)] truncate">
-                              {u.role.replace(/_/g, " ")}
+                              {effectiveStatus === "ONLINE" ? (
+                                <span className="text-emerald-600 dark:text-emerald-400 font-semibold">Online</span>
+                              ) : effectiveStatus === "OFFLINE" ? (
+                                <span>Logged out {u.last_seen_str ? `at ${u.last_seen_str}` : "recently"}</span>
+                              ) : (
+                                <span>{cfg.label}</span>
+                              )}
+                              {` • ${u.role.replace(/_/g, " ")}`}
                             </div>
                             {u.availability_status === "NOT_AVAILABLE" && u.not_available_to && (
                               <div className="text-[9px] text-rose-500 truncate mt-0.5">
@@ -819,24 +833,50 @@ export const RightRail: React.FC<RightRailProps> = ({
           </div>
         )}
 
-        {/* MESSENGER-STYLE FLOATING CIRCULAR CHAT BUBBLE (Bottom-Right Dock) */}
+        {/* DESKTOP VIEW: ORIGINAL SLEEK DOCKED PILL BUTTON (>= 640px) */}
+        <button
+          type="button"
+          onClick={() => setIsDrawerOpen(!isDrawerOpen)}
+          className="hidden sm:flex px-4 py-2.5 rounded-full bg-[var(--bg-card)]/95 backdrop-blur-md border border-[var(--border-color)] shadow-xl hover:shadow-2xl items-center gap-2.5 cursor-pointer hover:scale-[1.02] transition-all"
+        >
+          <div className="relative flex items-center justify-center text-[var(--accent-color)]">
+            <MessageSquare className="w-4 h-4" />
+            {totalUnreadCount > 0 && (
+              <span className="absolute -top-1.5 -right-1.5 px-1 py-0.2 rounded-full text-[9px] font-bold bg-rose-500 text-white animate-pulse">
+                {totalUnreadCount}
+              </span>
+            )}
+          </div>
+          <span className="text-xs font-bold text-[var(--text-primary)]">Team Chat</span>
+          <div className="flex items-center gap-1 pl-1 border-l border-[var(--border-color)]">
+            <span className={`w-2 h-2 rounded-full ${myCfg.dotClass}`} />
+            <span className="text-[10px] font-medium text-[var(--text-secondary)]">{myCfg.label}</span>
+          </div>
+          {isDrawerOpen ? (
+            <ChevronDown className="w-3.5 h-3.5 text-[var(--text-secondary)]" />
+          ) : (
+            <ChevronUp className="w-3.5 h-3.5 text-[var(--text-secondary)]" />
+          )}
+        </button>
+
+        {/* MOBILE VIEW: COMPACT MESSENGER BUBBLE (< 640px only) */}
         <button
           type="button"
           onClick={() => setIsDrawerOpen(!isDrawerOpen)}
           title={isDrawerOpen ? "Close Team Chat" : "Open Team Chat"}
           aria-label="Open Team Chat"
-          className="relative w-12 h-12 sm:w-14 sm:h-14 rounded-full bg-gradient-to-tr from-[var(--accent-color)] to-blue-600 hover:from-[var(--accent-color)] hover:to-indigo-600 text-white shadow-2xl hover:shadow-blue-500/40 flex items-center justify-center cursor-pointer hover:scale-105 active:scale-95 transition-all border-2 border-white dark:border-slate-800"
+          className="sm:hidden relative w-12 h-12 rounded-full bg-gradient-to-tr from-[var(--accent-color)] to-blue-600 hover:from-[var(--accent-color)] hover:to-indigo-600 text-white shadow-2xl flex items-center justify-center cursor-pointer hover:scale-105 active:scale-95 transition-all border-2 border-white dark:border-slate-800"
         >
           {isDrawerOpen ? (
-            <X className="w-5 h-5 sm:w-6 sm:h-6 transition-transform duration-200" />
+            <X className="w-5 h-5 transition-transform duration-200" />
           ) : (
-            <MessageCircle className="w-5 h-5 sm:w-6 sm:h-6 transition-transform duration-200" />
+            <MessageCircle className="w-5 h-5 transition-transform duration-200" />
           )}
 
           {/* User Presence Status Indicator on the Bubble edge */}
           {!isDrawerOpen && (
             <span
-              className={`absolute bottom-0 right-0 w-3.5 h-3.5 rounded-full ${myCfg.dotClass} ring-2 ring-white dark:ring-slate-900 shadow-xs`}
+              className={`absolute bottom-0 right-0 w-3 h-3 rounded-full ${myCfg.dotClass} ring-2 ring-white dark:ring-slate-900 shadow-xs`}
               title={`Your Status: ${myCfg.label}`}
             />
           )}
@@ -888,13 +928,21 @@ export const RightRail: React.FC<RightRailProps> = ({
                 } flex items-center justify-between shrink-0 cursor-pointer select-none`}
               >
                 <div className="flex items-center gap-2 min-w-0">
-                  <div className="relative w-6 h-6 rounded-full bg-[var(--accent-color)]/10 text-[var(--accent-color)] font-bold text-[10px] flex items-center justify-center shrink-0">
-                    <span>
-                      {floatingChat.peer?.full_name
-                        .split(" ")
-                        .map((n) => n[0])
-                        .join("")}
-                    </span>
+                  <div className="relative w-7 h-7 rounded-full bg-[var(--accent-color)]/10 text-[var(--accent-color)] font-bold text-[10px] flex items-center justify-center shrink-0 overflow-hidden">
+                    {floatingChat.peer?.avatar_url ? (
+                      <img
+                        src={floatingChat.peer.avatar_url}
+                        alt={floatingChat.peer.full_name}
+                        className="w-full h-full object-cover"
+                      />
+                    ) : (
+                      <span>
+                        {floatingChat.peer?.full_name
+                          .split(" ")
+                          .map((n) => n[0])
+                          .join("")}
+                      </span>
+                    )}
                     <span
                       className={`absolute bottom-0 right-0 w-2 h-2 rounded-full ${peerCfg.dotClass} ring-1 ring-white dark:ring-slate-900`}
                     />
@@ -905,9 +953,14 @@ export const RightRail: React.FC<RightRailProps> = ({
                       {floatingChat.peer?.full_name}
                     </div>
                     <div className="text-[9px] text-[var(--text-secondary)] truncate">
-                      {`${peerCfg.label} • ${
-                        floatingChat.peer?.role.replace(/_/g, " ") || ""
-                      }`}
+                      {peerStatus === "ONLINE" ? (
+                        <span className="text-emerald-600 dark:text-emerald-400 font-semibold">Online</span>
+                      ) : peerStatus === "OFFLINE" ? (
+                        <span>Logged out {floatingChat.peer?.last_seen_str ? `at ${floatingChat.peer.last_seen_str}` : "recently"}</span>
+                      ) : (
+                        <span>{peerCfg.label}</span>
+                      )}
+                      {` • ${floatingChat.peer?.role.replace(/_/g, " ") || ""}`}
                     </div>
                   </div>
                 </div>

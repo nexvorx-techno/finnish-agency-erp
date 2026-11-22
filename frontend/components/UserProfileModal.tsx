@@ -251,6 +251,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
       const payload: Record<string, unknown> = {
         full_name: fullName.trim(),
         email: email.trim().toLowerCase(),
+        avatar_url: avatarUrl || null,
       };
 
       if (newPassword.trim()) {
@@ -285,6 +286,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
           const pinData = JSON.parse(pinJson);
           pinData.userName = fullName.trim();
           pinData.userEmail = email.trim().toLowerCase();
+          pinData.avatarUrl = avatarUrl || null;
           localStorage.setItem("suomistaff_client_pin", JSON.stringify(pinData));
         } catch {}
       }

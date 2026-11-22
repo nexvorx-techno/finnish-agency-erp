@@ -189,15 +189,26 @@ def get_internal_chat_users(
         is_stale = (u.id != current_user_id) and (last_seen is None or (now - last_seen).total_seconds() > 25)
         effective_status = "OFFLINE" if (not u.is_active or raw_status == "OFFLINE" or is_stale) else raw_status
 
+        last_seen_str = ""
+        if last_seen:
+            if last_seen.date() == now.date():
+                last_seen_str = f"Today at {last_seen.strftime('%H:%M')}"
+            elif last_seen.date() == (now - timedelta(days=1)).date():
+                last_seen_str = f"Yesterday at {last_seen.strftime('%H:%M')}"
+            else:
+                last_seen_str = last_seen.strftime("%d %b, %H:%M")
+
         result.append(
             {
                 "id": u.id,
                 "full_name": u.full_name,
                 "role": u.role,
                 "email": u.email,
+                "avatar_url": getattr(u, "avatar_url", None),
                 "is_active": u.is_active,
                 "assigned_site_ids": u.assigned_site_ids or "*",
                 "availability_status": effective_status,
+                "last_seen_str": last_seen_str,
                 "not_available_from": getattr(u, "not_available_from", None),
                 "not_available_to": getattr(u, "not_available_to", None),
                 "not_available_reason": getattr(u, "not_available_reason", None),

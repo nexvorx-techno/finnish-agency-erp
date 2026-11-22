@@ -354,7 +354,10 @@ export default function ClientPortalPage() {
       }),
     }).catch(() => {});
 
-    const savedAvatar = localStorage.getItem(`erp_user_avatar_${userData.userId}`) || "";
+    const savedAvatar =
+      userData.avatarUrl ||
+      localStorage.getItem(`erp_user_avatar_${userData.userId}`) ||
+      "";
     const savedPhone = localStorage.getItem(`user_phone_${userData.userId}`) || "";
     const savedTitle = localStorage.getItem(`user_title_${userData.userId}`) || "";
     const savedDept = localStorage.getItem(`user_dept_${userData.userId}`) || "";

@@ -25,6 +25,7 @@ interface ClientLoginProps {
     role: string;
     clientId: number;
     clientName: string;
+    avatarUrl?: string;
     assigned_site_ids?: string;
     mustChangePassword?: boolean;
     modulePermissions?: string;
@@ -37,6 +38,7 @@ interface ClientLoginProps {
     length: 4 | 6;
     userEmail: string;
     userName: string;
+    avatarUrl?: string;
     role?: string;
     assigned_site_ids?: string;
     modulePermissions?: string;
@@ -135,6 +137,7 @@ export const ClientLogin: React.FC<ClientLoginProps> = ({
             role: data.role,
             clientId: data.client_id,
             clientName: data.client_name,
+            avatarUrl: data.avatar_url || localStorage.getItem(`erp_user_avatar_${data.user_id}`) || "",
             assigned_site_ids: data.assigned_site_ids,
             mustChangePassword: Boolean(data.must_change_password),
             modulePermissions: data.module_permissions || "{}",
@@ -186,6 +189,7 @@ export const ClientLogin: React.FC<ClientLoginProps> = ({
             role: savedPinData.role || (resolvedUserId === 1 ? "CLIENT_ADMIN" : "SITE_MANAGER"),
             clientId: company.id,
             clientName: company.name,
+            avatarUrl: savedPinData.avatarUrl || localStorage.getItem(`erp_user_avatar_${resolvedUserId}`) || "",
             assigned_site_ids: savedPinData.assigned_site_ids || "*",
             modulePermissions: savedPinData.modulePermissions || "{}",
             token: `pin_session_${Date.now()}`,
@@ -224,6 +228,7 @@ export const ClientLogin: React.FC<ClientLoginProps> = ({
         role: savedPinData.role || (resolvedUserId === 1 ? "CLIENT_ADMIN" : "SITE_MANAGER"),
         clientId: company.id,
         clientName: company.name,
+        avatarUrl: savedPinData.avatarUrl || localStorage.getItem(`erp_user_avatar_${resolvedUserId}`) || "",
         assigned_site_ids: savedPinData.assigned_site_ids || "*",
         modulePermissions: savedPinData.modulePermissions || "{}",
         token: `pin_session_${Date.now()}`,

@@ -18,6 +18,7 @@ class ClientLoginResponse(BaseModel):
     must_change_password: bool = False
     module_permissions: str = "{}"
     token: str
+    avatar_url: Optional[str] = None
 
 # Client Site Schemas
 class ClientSiteBase(BaseModel):
