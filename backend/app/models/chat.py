@@ -13,7 +13,7 @@ class InternalChatMessage(Base):
     # Channel type: "GENERAL" (team plant channel) or "DIRECT" (1-on-1 private message)
     channel_type = Column(String(20), nullable=False, default="GENERAL", index=True)
     
-    sender_id = Column(Integer, ForeignKey("client_users.id"), nullable=False)
+    sender_id = Column(Integer, ForeignKey("client_users.id"), nullable=False, index=True)
     sender_name = Column(String(255), nullable=False)
     sender_role = Column(String(100), nullable=False)
     
@@ -22,7 +22,7 @@ class InternalChatMessage(Base):
     
     content = Column(Text, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
-    is_read = Column(Boolean, default=False)
+    is_read = Column(Boolean, default=False, index=True)
 
     # Relationships
     company = relationship("ClientCompany")

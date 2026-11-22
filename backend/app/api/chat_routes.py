@@ -3,7 +3,7 @@ from typing import List, Optional
 from pydantic import BaseModel
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
-from sqlalchemy import or_, and_
+from sqlalchemy import or_, and_, func
 
 from app.core.database import get_db
 from app.models.client import ClientUser
@@ -116,50 +116,52 @@ def get_internal_chat_users(
     if active_ttl != "OFF":
         purge_expired_messages(client_id, active_ttl, db)
 
+    # Pre-aggregate unread counts and latest messages in batch to eliminate N+1 latency
+    unread_counts_map = {}
+    last_msg_map = {}
+    if current_user_id:
+        counts = (
+            db.query(InternalChatMessage.sender_id, func.count(InternalChatMessage.id))
+            .filter(
+                InternalChatMessage.client_id == client_id,
+                InternalChatMessage.portal_type == "CLIENT",
+                InternalChatMessage.channel_type == "DIRECT",
+                InternalChatMessage.recipient_id == current_user_id,
+                InternalChatMessage.is_read == False,
+            )
+            .group_by(InternalChatMessage.sender_id)
+            .all()
+        )
+        unread_counts_map = {sender_id: count for sender_id, count in counts}
+
+        # Fetch recent messages involving current_user_id in a single fast query
+        recent_msgs = (
+            db.query(InternalChatMessage)
+            .filter(
+                InternalChatMessage.client_id == client_id,
+                InternalChatMessage.portal_type == "CLIENT",
+                InternalChatMessage.channel_type == "DIRECT",
+                or_(
+                    InternalChatMessage.sender_id == current_user_id,
+                    InternalChatMessage.recipient_id == current_user_id,
+                ),
+            )
+            .order_by(InternalChatMessage.id.desc())
+            .limit(100)
+            .all()
+        )
+        for m in recent_msgs:
+            peer_key = m.recipient_id if m.sender_id == current_user_id else m.sender_id
+            if peer_key and peer_key not in last_msg_map:
+                last_msg_map[peer_key] = {
+                    "content": m.content[:35],
+                    "time_str": m.created_at.strftime("%H:%M") if m.created_at else "",
+                }
+
     result = []
     for u in users:
-        unread_count = 0
-        if current_user_id and u.id != current_user_id:
-            unread_count = (
-                db.query(InternalChatMessage)
-                .filter(
-                    InternalChatMessage.client_id == client_id,
-                    InternalChatMessage.portal_type == "CLIENT",
-                    InternalChatMessage.channel_type == "DIRECT",
-                    InternalChatMessage.sender_id == u.id,
-                    InternalChatMessage.recipient_id == current_user_id,
-                    InternalChatMessage.is_read == False,
-                )
-                .count()
-            )
-
-        last_msg = None
-        if current_user_id and u.id != current_user_id:
-            last_msg_obj = (
-                db.query(InternalChatMessage)
-                .filter(
-                    InternalChatMessage.client_id == client_id,
-                    InternalChatMessage.portal_type == "CLIENT",
-                    InternalChatMessage.channel_type == "DIRECT",
-                    or_(
-                        and_(
-                            InternalChatMessage.sender_id == current_user_id,
-                            InternalChatMessage.recipient_id == u.id,
-                        ),
-                        and_(
-                            InternalChatMessage.sender_id == u.id,
-                            InternalChatMessage.recipient_id == current_user_id,
-                        ),
-                    ),
-                )
-                .order_by(InternalChatMessage.id.desc())
-                .first()
-            )
-            if last_msg_obj:
-                last_msg = {
-                    "content": last_msg_obj.content[:35],
-                    "time_str": last_msg_obj.created_at.strftime("%H:%M") if last_msg_obj.created_at else "",
-                }
+        unread_count = unread_counts_map.get(u.id, 0)
+        last_msg = last_msg_map.get(u.id)
 
         # Determine effective availability: if user is not active or offline, status is OFFLINE
         raw_status = getattr(u, "availability_status", "OFFLINE") or "OFFLINE"
@@ -320,16 +322,29 @@ def get_internal_chat_messages(
         if peer_typing_time and (datetime.utcnow() - peer_typing_time).total_seconds() < 4.0:
             is_peer_typing = True
 
-        # Mark messages sent from peer to user as read
-        db.query(InternalChatMessage).filter(
-            InternalChatMessage.client_id == client_id,
-            InternalChatMessage.portal_type == "CLIENT",
-            InternalChatMessage.channel_type == "DIRECT",
-            InternalChatMessage.sender_id == peer_id,
-            InternalChatMessage.recipient_id == user_id,
-            InternalChatMessage.is_read == False,
-        ).update({"is_read": True}, synchronize_session=False)
-        db.commit()
+        # Only perform DB write & commit if unread messages actually exist from peer
+        has_unread = (
+            db.query(InternalChatMessage.id)
+            .filter(
+                InternalChatMessage.client_id == client_id,
+                InternalChatMessage.portal_type == "CLIENT",
+                InternalChatMessage.channel_type == "DIRECT",
+                InternalChatMessage.sender_id == peer_id,
+                InternalChatMessage.recipient_id == user_id,
+                InternalChatMessage.is_read == False,
+            )
+            .first()
+        )
+        if has_unread:
+            db.query(InternalChatMessage).filter(
+                InternalChatMessage.client_id == client_id,
+                InternalChatMessage.portal_type == "CLIENT",
+                InternalChatMessage.channel_type == "DIRECT",
+                InternalChatMessage.sender_id == peer_id,
+                InternalChatMessage.recipient_id == user_id,
+                InternalChatMessage.is_read == False,
+            ).update({"is_read": True}, synchronize_session=False)
+            db.commit()
 
     messages = query.order_by(InternalChatMessage.id.asc()).limit(limit).all()
     return {

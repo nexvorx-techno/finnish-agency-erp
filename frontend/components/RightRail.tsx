@@ -183,7 +183,6 @@ export const RightRail: React.FC<RightRailProps> = ({
   const chatBoxRef = useRef<HTMLDivElement>(null);
   const [activeMessages, setActiveMessages] = useState<ChatMessage[]>([]);
   const [chatInput, setChatInput] = useState("");
-  const [isSending, setIsSending] = useState(false);
   const [isPeerTyping, setIsPeerTyping] = useState(false);
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const prevUnreadMapRef = useRef<Record<number, number>>({});
@@ -380,22 +379,33 @@ export const RightRail: React.FC<RightRailProps> = ({
           }
           lastMsgIdRef.current = lastMsg.id;
         }
-        setActiveMessages(msgs);
+        setActiveMessages((prev) => {
+          // Preserve optimistic messages that haven't landed on server yet
+          const pendingOptimistic = prev.filter(
+            (p) => p.id < 0 && !msgs.some((m) => m.content === p.content && m.sender_id === p.sender_id)
+          );
+          return [...msgs, ...pendingOptimistic];
+        });
         setIsPeerTyping(Boolean(data.is_peer_typing));
       }
     } catch {}
   }, [clientId, currentUser, floatingChat.isOpen, floatingChat.peer, playNotificationSound]);
 
-  // Real-time polling: 2s when active conversation is open
+  // Real-time polling:
+  // 1. Poll users presence & unread badges every 8s
   useEffect(() => {
     fetchUsers();
+    const userInterval = setInterval(fetchUsers, 8000);
+    return () => clearInterval(userInterval);
+  }, [fetchUsers]);
+
+  // 2. Poll active conversation every 1.5s ONLY when floating chat is open and active
+  useEffect(() => {
+    if (!floatingChat.isOpen || floatingChat.isMinimized) return;
     fetchFloatingMessages();
-    const interval = setInterval(() => {
-      fetchUsers();
-      fetchFloatingMessages();
-    }, 2000);
-    return () => clearInterval(interval);
-  }, [fetchUsers, fetchFloatingMessages]);
+    const msgInterval = setInterval(fetchFloatingMessages, 1500);
+    return () => clearInterval(msgInterval);
+  }, [floatingChat.isOpen, floatingChat.isMinimized, fetchFloatingMessages]);
 
   // Auto-scroll chat box to bottom
   useEffect(() => {
@@ -483,14 +493,39 @@ export const RightRail: React.FC<RightRailProps> = ({
     }
   };
 
-  // Send Message inside LinkedIn Floating Chat Box
+  // Send Message inside Floating Chat Box with 0ms Instant Optimistic UI
   const handleSendChatMessage = async () => {
     const text = chatInput.trim();
-    if (!text || !currentUser || !floatingChat.peer || isSending) return;
+    if (!text || !currentUser || !floatingChat.peer) return;
 
     if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
     notifyTyping(false);
-    setIsSending(true);
+
+    // 1. Instantly clear input so user can continue typing next message with 0ms delay
+    setChatInput("");
+
+    // 2. Render optimistic local message immediately in the conversation thread
+    const optimisticId = -Date.now();
+    const optimisticMsg: ChatMessage = {
+      id: optimisticId,
+      client_id: clientId,
+      portal_type: "CLIENT",
+      channel_type: "DIRECT",
+      sender_id: currentUser.userId,
+      sender_name: currentUser.fullName || "Client Admin",
+      sender_role: currentUser.role || "CLIENT_ADMIN",
+      recipient_id: floatingChat.peer.id,
+      recipient_name: floatingChat.peer.full_name,
+      content: text,
+      created_at: new Date().toISOString(),
+      time_str: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false }),
+      date_str: "Today",
+      is_read: false,
+    };
+
+    setActiveMessages((prev) => [...prev, optimisticMsg]);
+
+    // 3. Background asynchronous persistence
     try {
       const payload = {
         channel_type: "DIRECT",
@@ -509,12 +544,13 @@ export const RightRail: React.FC<RightRailProps> = ({
 
       if (res.ok) {
         const newMsg: ChatMessage = await res.json();
-        setActiveMessages((prev) => [...prev, newMsg]);
-        setChatInput("");
-        fetchUsers();
+        // Replace optimistic placeholder with real persisted message
+        setActiveMessages((prev) =>
+          prev.map((m) => (m.id === optimisticId ? newMsg : m))
+        );
       }
-    } catch {} finally {
-      setIsSending(false);
+    } catch (err) {
+      console.error("Message send failed:", err);
     }
   };
 
@@ -984,7 +1020,7 @@ export const RightRail: React.FC<RightRailProps> = ({
                 />
                 <button
                   type="submit"
-                  disabled={!chatInput.trim() || isSending}
+                  disabled={!chatInput.trim()}
                   className="p-1.5 rounded-xl bg-[var(--accent-color)] hover:bg-[var(--accent-hover)] disabled:opacity-50 text-white cursor-pointer transition-transform active:scale-95 shadow-xs"
                   title="Send message (Enter)"
                 >
