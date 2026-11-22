@@ -191,6 +191,20 @@ export const RightRail: React.FC<RightRailProps> = ({
   const audioCtxRef = useRef<AudioContext | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
+  // Accurately resolve my ID from the user directory by matching Email or ID
+  const actualMe = useMemo(() => {
+    if (!currentUser) return null;
+    return (
+      chatUsers.find(
+        (u) =>
+          (currentUser.email && u.email && u.email.toLowerCase() === currentUser.email.toLowerCase()) ||
+          u.id === currentUser.userId
+      ) || null
+    );
+  }, [chatUsers, currentUser]);
+
+  const currentUserId = actualMe ? actualMe.id : (currentUser?.userId || 1);
+
   // Play pleasant notification chime (Web Audio API - Slack/iOS style two-tone)
   const playNotificationSound = useCallback(() => {
     try {
@@ -259,14 +273,14 @@ export const RightRail: React.FC<RightRailProps> = ({
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            sender_id: currentUser.userId,
+            sender_id: currentUserId,
             recipient_id: floatingChat.peer.id,
             is_typing: isTyping,
           }),
         });
       } catch {}
     },
-    [clientId, currentUser, floatingChat.peer]
+    [clientId, currentUserId, floatingChat.peer]
   );
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -309,7 +323,7 @@ export const RightRail: React.FC<RightRailProps> = ({
     if (!currentUser) return;
     try {
       const res = await fetch(
-        `${API_BASE}/api/client/${clientId}/chat/users?current_user_id=${currentUser.userId}`
+        `${API_BASE}/api/client/${clientId}/chat/users?current_user_id=${currentUserId}`
       );
       if (res.ok) {
         const data = await res.json();
@@ -320,7 +334,7 @@ export const RightRail: React.FC<RightRailProps> = ({
         if (!isFirstLoadRef.current) {
           for (const u of users) {
             const prev = prevUnreadMapRef.current[u.id] || 0;
-            if (u.id !== currentUser.userId && (u.unread_count || 0) > prev) {
+            if (u.id !== currentUserId && (u.unread_count || 0) > prev) {
               playNotificationSound();
               setFloatingChat({
                 isOpen: true,
@@ -339,7 +353,11 @@ export const RightRail: React.FC<RightRailProps> = ({
         prevUnreadMapRef.current = unreadMap;
 
         // Sync my own availability
-        const me = users.find((u) => u.id === currentUser.userId);
+        const me = users.find(
+          (u) =>
+            (currentUser?.email && u.email && u.email.toLowerCase() === currentUser.email.toLowerCase()) ||
+            u.id === currentUserId
+        );
         if (me) {
           setMyAvailability(me.availability_status || "ONLINE");
           setMyNotAvailableDetails({
@@ -351,7 +369,7 @@ export const RightRail: React.FC<RightRailProps> = ({
         }
       }
     } catch {}
-  }, [clientId, currentUser, playNotificationSound]);
+  }, [clientId, currentUser, currentUserId, playNotificationSound]);
 
   // Fetch Floating Box Messages (1-on-1 direct chat + typing status)
   const fetchFloatingMessages = useCallback(async () => {
@@ -359,7 +377,7 @@ export const RightRail: React.FC<RightRailProps> = ({
     try {
       const params = new URLSearchParams({
         channel_type: "DIRECT",
-        user_id: String(currentUser.userId),
+        user_id: String(currentUserId),
         peer_id: String(floatingChat.peer.id),
       });
       const res = await fetch(
@@ -426,7 +444,7 @@ export const RightRail: React.FC<RightRailProps> = ({
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          user_id: currentUser.userId,
+          user_id: currentUserId,
           availability_status: status,
         }),
       });
@@ -446,7 +464,7 @@ export const RightRail: React.FC<RightRailProps> = ({
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          user_id: currentUser.userId,
+          user_id: currentUserId,
           availability_status: "NOT_AVAILABLE",
           not_available_from: myNotAvailableDetails.from,
           not_available_to: myNotAvailableDetails.to,
@@ -511,7 +529,7 @@ export const RightRail: React.FC<RightRailProps> = ({
       client_id: clientId,
       portal_type: "CLIENT",
       channel_type: "DIRECT",
-      sender_id: currentUser.userId,
+      sender_id: currentUserId,
       sender_name: currentUser.fullName || "Client Admin",
       sender_role: currentUser.role || "CLIENT_ADMIN",
       recipient_id: floatingChat.peer.id,
@@ -529,7 +547,7 @@ export const RightRail: React.FC<RightRailProps> = ({
     try {
       const payload = {
         channel_type: "DIRECT",
-        sender_id: currentUser.userId,
+        sender_id: currentUserId,
         sender_name: currentUser.fullName || "Client Admin",
         sender_role: currentUser.role || "CLIENT_ADMIN",
         recipient_id: floatingChat.peer.id,
@@ -554,17 +572,20 @@ export const RightRail: React.FC<RightRailProps> = ({
     }
   };
 
-  // Filter colleague users (exclude myself)
+  // Filter colleague users (exclude myself accurately by both ID and Email)
   const colleagues = useMemo(() => {
     return chatUsers.filter((u) => {
-      if (currentUser && u.id === currentUser.userId) return false;
+      // Exclude by resolved ID
+      if (u.id === currentUserId) return false;
+      // Exclude by Email
+      if (currentUser?.email && u.email && u.email.toLowerCase() === currentUser.email.toLowerCase()) return false;
       if (!userSearch.trim()) return true;
       return (
         u.full_name.toLowerCase().includes(userSearch.toLowerCase()) ||
         u.role.toLowerCase().includes(userSearch.toLowerCase())
       );
     });
-  }, [chatUsers, currentUser, userSearch]);
+  }, [chatUsers, currentUser, currentUserId, userSearch]);
 
   const totalUnreadCount = useMemo(() => {
     return chatUsers.reduce((sum, u) => sum + (u.unread_count || 0), 0);
@@ -946,7 +967,7 @@ export const RightRail: React.FC<RightRailProps> = ({
                   </div>
                 ) : (
                   activeMessages.map((m) => {
-                    const isMe = currentUser && m.sender_id === currentUser.userId;
+                    const isMe = m.sender_id === currentUserId;
                     return (
                       <div
                         key={m.id}

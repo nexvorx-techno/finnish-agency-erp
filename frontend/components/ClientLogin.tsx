@@ -32,10 +32,14 @@ interface ClientLoginProps {
   }) => void;
   onOpenPreferences: () => void;
   savedPinData: {
+    userId?: number;
     pin: string;
     length: 4 | 6;
     userEmail: string;
     userName: string;
+    role?: string;
+    assigned_site_ids?: string;
+    modulePermissions?: string;
   } | null;
 }
 
@@ -171,14 +175,19 @@ export const ClientLogin: React.FC<ClientLoginProps> = ({
         setErrorMessage("");
         setIsLoading(true);
         const timer = setTimeout(() => {
+          const resolvedUserId =
+            savedPinData.userId ||
+            (savedPinData.userEmail.toLowerCase().includes("developer") || savedPinData.userEmail.toLowerCase().includes("rishikesh") ? 3 :
+             savedPinData.userEmail.toLowerCase().includes("heikki") ? 2 : 1);
           onLoginSuccess({
-            userId: 1,
-            fullName: savedPinData.userName || "Client Admin",
+            userId: resolvedUserId,
+            fullName: savedPinData.userName || (resolvedUserId === 3 ? "Rishikesh" : "Client User"),
             email: savedPinData.userEmail,
-            role: "CLIENT_ADMIN",
+            role: savedPinData.role || (resolvedUserId === 1 ? "CLIENT_ADMIN" : "SITE_MANAGER"),
             clientId: company.id,
             clientName: company.name,
-            assigned_site_ids: "*",
+            assigned_site_ids: savedPinData.assigned_site_ids || "*",
+            modulePermissions: savedPinData.modulePermissions || "{}",
             token: `pin_session_${Date.now()}`,
           });
         }, 600);
@@ -204,14 +213,19 @@ export const ClientLogin: React.FC<ClientLoginProps> = ({
     setErrorMessage("");
     setIsLoading(true);
     setTimeout(() => {
+      const resolvedUserId =
+        savedPinData.userId ||
+        (savedPinData.userEmail.toLowerCase().includes("developer") || savedPinData.userEmail.toLowerCase().includes("rishikesh") ? 3 :
+         savedPinData.userEmail.toLowerCase().includes("heikki") ? 2 : 1);
       onLoginSuccess({
-        userId: 1,
-        fullName: savedPinData.userName || "Client Admin",
+        userId: resolvedUserId,
+        fullName: savedPinData.userName || (resolvedUserId === 3 ? "Rishikesh" : "Client User"),
         email: savedPinData.userEmail,
-        role: "CLIENT_ADMIN",
+        role: savedPinData.role || (resolvedUserId === 1 ? "CLIENT_ADMIN" : "SITE_MANAGER"),
         clientId: company.id,
         clientName: company.name,
-        assigned_site_ids: "*",
+        assigned_site_ids: savedPinData.assigned_site_ids || "*",
+        modulePermissions: savedPinData.modulePermissions || "{}",
         token: `pin_session_${Date.now()}`,
       });
     }, 600);

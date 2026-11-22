@@ -77,10 +77,14 @@ export interface CurrentUser {
 }
 
 interface SavedPinData {
+  userId?: number;
   pin: string;
   length: 4 | 6;
   userEmail: string;
   userName: string;
+  role?: string;
+  assigned_site_ids?: string;
+  modulePermissions?: string;
 }
 
 const INITIAL_SUMMARY: SummaryType = {
@@ -423,10 +427,14 @@ export default function ClientPortalPage() {
   const handlePinSaved = (newPin: string, length: 4 | 6) => {
     if (!currentUser) return;
     const pinData: SavedPinData = {
+      userId: currentUser.userId,
       pin: newPin,
       length: length,
       userEmail: currentUser.email,
       userName: currentUser.fullName,
+      role: currentUser.role,
+      assigned_site_ids: currentUser.assigned_site_ids,
+      modulePermissions: currentUser.modulePermissions,
     };
     setSavedPinData(pinData);
     try {
