@@ -17,6 +17,7 @@ import { ClientUserManagement, UserMgmtSubTab } from "../components/ClientUserMa
 import { MasterDataModule, MasterSubTab } from "../components/MasterDataModule";
 import { ShiftPlanningModule, RosterSubTab } from "../components/ShiftPlanningModule";
 import { InvoicesSettlementModule } from "../components/InvoicesSettlementModule";
+import { WorkerOperationsModule } from "../components/WorkerOperationsModule";
 import { UserProfileModal } from "../components/UserProfileModal";
 import { GlobalLoader } from "../components/GlobalLoader";
 import { ArrowLeft, X } from "lucide-react";
@@ -834,6 +835,21 @@ export default function ClientPortalPage() {
                   : activeModule === "m1.6_credit"
                   ? "m1.6_credit"
                   : "m1.6_invoices"
+              }
+              onChangeSubTab={(tab) => navigateToModule(tab)}
+            />
+          ) : activeModule.startsWith("m1.5") ? (
+            <WorkerOperationsModule
+              clientId={currentUser.clientId}
+              companyName={summary.client_name}
+              userName={currentUser.fullName}
+              userRole={currentUser.role}
+              selectedSite={selectedSite}
+              sites={summary.sites}
+              activeSubTab={
+                activeModule === "m1.5_safety"
+                  ? "m1.5_safety"
+                  : "m1.5_actions"
               }
               onChangeSubTab={(tab) => navigateToModule(tab)}
             />

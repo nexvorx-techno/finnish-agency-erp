@@ -215,4 +215,56 @@ class ClientInvoice(Base):
     site = relationship("ClientSite")
 
 
+class WorkerActionRequest(Base):
+    __tablename__ = "worker_action_requests"
+
+    id = Column(Integer, primary_key=True, index=True)
+    client_id = Column(Integer, ForeignKey("client_companies.id"), nullable=False, index=True)
+    site_id = Column(Integer, ForeignKey("client_sites.id"), nullable=True)
+    worker_id = Column(Integer, nullable=False)
+    worker_name = Column(String(255), nullable=False)
+    role_title = Column(String(150), nullable=True)
+    action_type = Column(String(50), nullable=False)  # REQUEST_REPLACEMENT, SITE_SHIFT, END_PLACEMENT, PERFORMANCE_FEEDBACK
+    target_site_id = Column(Integer, ForeignKey("client_sites.id"), nullable=True)
+    target_site_name = Column(String(255), nullable=True)
+    urgency = Column(String(50), default="STANDARD")  # IMMEDIATE_24H, 3_DAYS, STANDARD_1_WEEK
+    rating = Column(Integer, nullable=True)  # 1-5 stars
+    reason = Column(Text, nullable=False)
+    effective_date = Column(Date, nullable=True)
+    status = Column(String(50), default="PENDING_AGENCY")  # PENDING_AGENCY, IN_REVIEW, ACTIONED, RESOLVED, CANCELLED
+    agency_feedback = Column(Text, nullable=True)
+    created_by_name = Column(String(255), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    company = relationship("ClientCompany")
+    site = relationship("ClientSite", foreign_keys=[site_id])
+    target_site = relationship("ClientSite", foreign_keys=[target_site_id])
+
+
+class SafetyIncidentLog(Base):
+    __tablename__ = "safety_incident_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    incident_code = Column(String(50), unique=True, index=True, nullable=False)
+    client_id = Column(Integer, ForeignKey("client_companies.id"), nullable=False, index=True)
+    site_id = Column(Integer, ForeignKey("client_sites.id"), nullable=True)
+    workshop_line = Column(String(150), nullable=False)
+    incident_type = Column(String(50), nullable=False)  # NEAR_MISS, MINOR_INJURY, EQUIPMENT_DAMAGE, SAFETY_VIOLATION
+    severity = Column(String(50), default="LOW")  # LOW, MEDIUM, HIGH, CRITICAL
+    occurred_at = Column(DateTime, nullable=False)
+    involved_worker_id = Column(Integer, nullable=True)
+    involved_worker_name = Column(String(255), nullable=True)
+    witnesses = Column(String(255), nullable=True)
+    description = Column(Text, nullable=False)
+    immediate_action_taken = Column(Text, nullable=False)
+    preventative_recommendation = Column(Text, nullable=True)
+    status = Column(String(50), default="REPORTED")  # REPORTED, AGENCY_INVESTIGATING, CORRECTIVE_ACTION_ISSUED, CLOSED
+    reported_by_name = Column(String(255), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    company = relationship("ClientCompany")
+    site = relationship("ClientSite")
+
+
+
 
