@@ -203,6 +203,9 @@ export default function ClientPortalPage() {
   const lastActivityRef = useRef<number>(Date.now());
 
   useEffect(() => {
+    // Proactively warm up cloud backend if sleeping
+    fetch(`${API_BASE}/health`).catch(() => {});
+
     try {
       const savedMenuPos = (localStorage.getItem("erp_menu_position") as MenuPositionType) || "left";
       setMenuPosition(savedMenuPos);
@@ -867,7 +870,7 @@ export default function ClientPortalPage() {
 
       {/* 3. Internal Portal Chat Right Rail */}
       <RightRail
-        clientId={currentUser.clientId}
+        clientId={currentUser.clientId || 1}
         companyName={summary.client_name}
         currentUser={currentUser}
       />

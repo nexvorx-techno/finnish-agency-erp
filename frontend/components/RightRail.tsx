@@ -20,6 +20,7 @@ import {
   Check,
   ChevronDown,
   ChevronUp,
+  Loader2,
 } from "lucide-react";
 import { CurrentUser } from "../app/page";
 
@@ -149,12 +150,25 @@ export const RightRail: React.FC<RightRailProps> = ({
   companyName = "Valmet Technologies Oy",
   currentUser,
 }) => {
+  const effectiveClientId = clientId || currentUser?.clientId || 1;
+
   // Floating Drawer Open/Collapse State (docked at bottom right)
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const drawerRef = useRef<HTMLDivElement>(null);
 
-  // Users & Availability state
-  const [chatUsers, setChatUsers] = useState<ChatUser[]>([]);
+  // Users & Availability state with instant LocalStorage hydration
+  const [chatUsers, setChatUsers] = useState<ChatUser[]>(() => {
+    if (typeof window === "undefined") return [];
+    try {
+      const cached = localStorage.getItem("erp_cached_chat_users");
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch {}
+    return [];
+  });
+  const [isLoadingUsers, setIsLoadingUsers] = useState<boolean>(true);
   const [myAvailability, setMyAvailability] = useState<AvailabilityType>("ONLINE");
   const [myNotAvailableDetails, setMyNotAvailableDetails] = useState<{
     from: string;
@@ -207,7 +221,7 @@ export const RightRail: React.FC<RightRailProps> = ({
     );
   }, [chatUsers, currentUser]);
 
-  const currentUserId = actualMe ? actualMe.id : (currentUser?.userId || 1);
+  const currentUserId = actualMe?.id || currentUser?.userId || 1;
 
   // Play pleasant notification chime (Web Audio API - Slack/iOS style two-tone)
   const playNotificationSound = useCallback(() => {
@@ -327,12 +341,16 @@ export const RightRail: React.FC<RightRailProps> = ({
     if (!currentUser) return;
     try {
       const res = await fetch(
-        `${API_BASE}/api/client/${clientId}/chat/users?current_user_id=${currentUserId}`
+        `${API_BASE}/api/client/${effectiveClientId}/chat/users?current_user_id=${currentUserId}`
       );
       if (res.ok) {
         const data = await res.json();
         const users: ChatUser[] = data.users || [];
         setChatUsers(users);
+        setIsLoadingUsers(false);
+        try {
+          localStorage.setItem("erp_cached_chat_users", JSON.stringify(users));
+        } catch {}
 
         // When a new unread message arrives from a colleague: play chime and directly open & maximize chat box!
         if (!isFirstLoadRef.current) {
@@ -371,9 +389,13 @@ export const RightRail: React.FC<RightRailProps> = ({
           });
           setDisappearingTtl(me.disappearing_messages_ttl || "OFF");
         }
+      } else {
+        setIsLoadingUsers(false);
       }
-    } catch {}
-  }, [clientId, currentUser, currentUserId, playNotificationSound]);
+    } catch {
+      setIsLoadingUsers(false);
+    }
+  }, [effectiveClientId, currentUser, currentUserId, playNotificationSound]);
 
   // Fetch Floating Box Messages (1-on-1 direct chat + typing status)
   const fetchFloatingMessages = useCallback(async () => {
@@ -746,12 +768,24 @@ export const RightRail: React.FC<RightRailProps> = ({
               </div>
 
               <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-secondary)] pt-1 px-1 flex items-center justify-between">
-                <span>Active Colleagues ({colleagues.length})</span>
+                <span>Team Directory ({colleagues.length})</span>
                 <span className="text-[9px] font-normal lowercase">click to chat</span>
               </div>
 
               {/* Users list */}
-              {colleagues.length === 0 ? (
+              {isLoadingUsers && colleagues.length === 0 ? (
+                <div className="p-6 rounded-xl border border-[var(--border-color)] bg-[var(--bg-secondary)]/50 text-center space-y-2 my-2 animate-pulse">
+                  <div className="w-8 h-8 mx-auto rounded-full bg-[var(--accent-color)]/10 text-[var(--accent-color)] flex items-center justify-center">
+                    <Loader2 className="w-4 h-4 animate-spin text-[var(--accent-color)]" />
+                  </div>
+                  <p className="text-xs font-semibold text-[var(--text-primary)]">
+                    Connecting to Team Directory...
+                  </p>
+                  <p className="text-[11px] text-[var(--text-secondary)] leading-relaxed">
+                    Syncing colleagues & live presence...
+                  </p>
+                </div>
+              ) : colleagues.length === 0 ? (
                 <div className="p-6 rounded-xl border border-dashed border-[var(--border-color)] text-center space-y-1.5 my-2">
                   <div className="w-8 h-8 mx-auto rounded-full bg-[var(--bg-secondary)] flex items-center justify-center text-[var(--text-secondary)]">
                     <Users className="w-4 h-4" />
