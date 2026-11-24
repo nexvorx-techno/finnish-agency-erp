@@ -102,27 +102,12 @@ def get_internal_chat_users(
     Returns ONLY real users belonging to this client company.
     Completely excludes Agency and Candidate/Employee users. Zero dummy users generated.
     """
-    users = (
-        db.query(ClientUser)
-        .filter(ClientUser.client_id == client_id)
-        .order_by(ClientUser.id.asc())
-        .all()
-    )
-
-    # Get current user's disappearing TTL
-    current_user = next((u for u in users if current_user_id and u.id == current_user_id), None)
-    active_ttl = current_user.disappearing_messages_ttl if current_user and current_user.disappearing_messages_ttl else "OFF"
-
-    # Enforce auto-disappearing purge if active
-    if active_ttl != "OFF":
-        purge_expired_messages(client_id, active_ttl, db)
-
-    # Pre-aggregate unread counts and latest messages in batch to eliminate N+1 latency
     now = datetime.utcnow()
     unread_counts_map = {}
     last_msg_map = {}
+
     if current_user_id:
-        # Heartbeat: record active timestamp and deliver pending messages
+        # Heartbeat: record active timestamp and deliver pending messages FIRST
         db.query(ClientUser).filter(ClientUser.id == current_user_id).update(
             {"last_seen_at": now}, synchronize_session=False
         )
@@ -174,6 +159,22 @@ def get_internal_chat_users(
                     "time_str": m.created_at.strftime("%H:%M") if m.created_at else "",
                 }
 
+    # Query fresh user records after heartbeat update
+    users = (
+        db.query(ClientUser)
+        .filter(ClientUser.client_id == client_id)
+        .order_by(ClientUser.id.asc())
+        .all()
+    )
+
+    # Get current user's disappearing TTL
+    current_user = next((u for u in users if current_user_id and u.id == current_user_id), None)
+    active_ttl = current_user.disappearing_messages_ttl if current_user and current_user.disappearing_messages_ttl else "OFF"
+
+    # Enforce auto-disappearing purge if active
+    if active_ttl != "OFF":
+        purge_expired_messages(client_id, active_ttl, db)
+
     result = []
     for u in users:
         unread_count = unread_counts_map.get(u.id, 0)
@@ -190,11 +191,13 @@ def get_internal_chat_users(
         effective_status = "OFFLINE" if (not u.is_active or raw_status == "OFFLINE" or is_stale) else raw_status
 
         last_seen_str = ""
+        last_seen_iso = None
         if last_seen:
+            last_seen_iso = last_seen.isoformat() + "Z"
             if last_seen.date() == now.date():
-                last_seen_str = f"Today at {last_seen.strftime('%H:%M')}"
+                last_seen_str = f"today at {last_seen.strftime('%H:%M')}"
             elif last_seen.date() == (now - timedelta(days=1)).date():
-                last_seen_str = f"Yesterday at {last_seen.strftime('%H:%M')}"
+                last_seen_str = f"yesterday at {last_seen.strftime('%H:%M')}"
             else:
                 last_seen_str = last_seen.strftime("%d %b, %H:%M")
 
@@ -208,6 +211,7 @@ def get_internal_chat_users(
                 "is_active": u.is_active,
                 "assigned_site_ids": u.assigned_site_ids or "*",
                 "availability_status": effective_status,
+                "last_seen_at": last_seen_iso,
                 "last_seen_str": last_seen_str,
                 "not_available_from": getattr(u, "not_available_from", None),
                 "not_available_to": getattr(u, "not_available_to", None),
@@ -253,6 +257,7 @@ def update_user_availability(
         raise HTTPException(status_code=404, detail="User not found")
 
     user.availability_status = payload.availability_status.strip().upper()
+    user.last_seen_at = datetime.utcnow()
     if payload.availability_status.strip().upper() == "NOT_AVAILABLE":
         user.not_available_from = payload.not_available_from
         user.not_available_to = payload.not_available_to

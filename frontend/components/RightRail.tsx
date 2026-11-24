@@ -43,6 +43,7 @@ interface ChatUser {
   email: string;
   assigned_site_ids: string;
   avatar_url?: string | null;
+  last_seen_at?: string | null;
   last_seen_str?: string;
   is_active?: boolean;
   availability_status: AvailabilityType;
@@ -55,6 +56,53 @@ interface ChatUser {
     content: string;
     time_str: string;
   } | null;
+}
+
+function formatLastSeen(isoStr?: string | null, fallbackStr?: string): string {
+  if (!isoStr) {
+    if (fallbackStr && fallbackStr.trim()) return fallbackStr;
+    return "recently";
+  }
+  try {
+    const date = new Date(isoStr);
+    if (isNaN(date.getTime())) return fallbackStr || "recently";
+    const now = new Date();
+    const diffMs = Math.max(0, now.getTime() - date.getTime());
+    const diffSec = Math.floor(diffMs / 1000);
+    const diffMin = Math.floor(diffSec / 60);
+
+    if (diffSec < 45) return "just now";
+    if (diffMin < 60) return `${diffMin}m ago`;
+
+    const isToday =
+      date.getDate() === now.getDate() &&
+      date.getMonth() === now.getMonth() &&
+      date.getFullYear() === now.getFullYear();
+
+    const yesterday = new Date(now);
+    yesterday.setDate(now.getDate() - 1);
+    const isYesterday =
+      date.getDate() === yesterday.getDate() &&
+      date.getMonth() === yesterday.getMonth() &&
+      date.getFullYear() === yesterday.getFullYear();
+
+    const timeStr = date.toLocaleTimeString([], {
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    });
+
+    if (isToday) return `today at ${timeStr}`;
+    if (isYesterday) return `yesterday at ${timeStr}`;
+
+    const dateStr = date.toLocaleDateString([], {
+      day: "numeric",
+      month: "short",
+    });
+    return `${dateStr}, ${timeStr}`;
+  } catch {
+    return fallbackStr || "recently";
+  }
 }
 
 interface ChatMessage {
@@ -839,7 +887,7 @@ export const RightRail: React.FC<RightRailProps> = ({
                               {effectiveStatus === "ONLINE" ? (
                                 <span className="text-emerald-600 dark:text-emerald-400 font-semibold">Online</span>
                               ) : effectiveStatus === "OFFLINE" ? (
-                                <span>Logged out {u.last_seen_str ? `at ${u.last_seen_str}` : "recently"}</span>
+                                <span>Last seen {formatLastSeen(u.last_seen_at, u.last_seen_str)}</span>
                               ) : (
                                 <span>{cfg.label}</span>
                               )}
@@ -990,7 +1038,7 @@ export const RightRail: React.FC<RightRailProps> = ({
                       {peerStatus === "ONLINE" ? (
                         <span className="text-emerald-600 dark:text-emerald-400 font-semibold">Online</span>
                       ) : peerStatus === "OFFLINE" ? (
-                        <span>Logged out {floatingChat.peer?.last_seen_str ? `at ${floatingChat.peer.last_seen_str}` : "recently"}</span>
+                        <span>Last seen {formatLastSeen(floatingChat.peer?.last_seen_at, floatingChat.peer?.last_seen_str)}</span>
                       ) : (
                         <span>{peerCfg.label}</span>
                       )}
