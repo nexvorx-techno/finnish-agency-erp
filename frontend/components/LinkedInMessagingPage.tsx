@@ -16,8 +16,14 @@ import {
   ChevronDown,
   ArrowLeft,
   ShieldCheck,
-  Sparkles,
   X,
+  Pin,
+  Archive,
+  ArchiveRestore,
+  Trash2,
+  MailCheck,
+  Mail,
+  MoreVertical,
 } from "lucide-react";
 import { CurrentUser } from "../app/page";
 
@@ -30,8 +36,6 @@ export type AvailabilityType =
   | "OUTSIDE"
   | "NOT_AVAILABLE"
   | "OFFLINE";
-
-export type DisappearingTtl = "OFF" | "24H" | "7D" | "30D";
 
 export interface ChatUser {
   id: number;
@@ -47,7 +51,7 @@ export interface ChatUser {
   not_available_from?: string | null;
   not_available_to?: string | null;
   not_available_reason?: string | null;
-  disappearing_messages_ttl?: DisappearingTtl;
+  disappearing_messages_ttl?: string;
   unread_count: number;
   last_message?: {
     content: string;
@@ -144,46 +148,56 @@ const AVAILABILITY_CONFIG: Record<
   },
 };
 
-// WhatsApp style formatting for device local time
-function formatLastSeen(isoStr?: string | null, fallbackStr?: string): string {
-  if (!isoStr) {
-    if (fallbackStr && fallbackStr.trim()) return fallbackStr;
-    return "recently";
+// Formats status next to colleague name (e.g. Rishikesh - Online, Mahesh - Not available till 30-11-2026)
+function getContactStatus(user: ChatUser): { statusText: string; colorClass: string; dotClass: string } {
+  const isUserOffline =
+    user.is_active === false ||
+    user.availability_status === "OFFLINE" ||
+    !user.availability_status;
+  const status: AvailabilityType = isUserOffline ? "OFFLINE" : user.availability_status;
+
+  if (status === "ONLINE") {
+    return {
+      statusText: "Online",
+      colorClass: "text-emerald-600 dark:text-emerald-400 font-semibold",
+      dotClass: "bg-emerald-500",
+    };
   }
-  try {
-    const date = new Date(isoStr);
-    if (isNaN(date.getTime())) return fallbackStr || "recently";
-
-    const now = new Date();
-    const isToday =
-      date.getDate() === now.getDate() &&
-      date.getMonth() === now.getMonth() &&
-      date.getFullYear() === now.getFullYear();
-
-    const yesterday = new Date(now);
-    yesterday.setDate(now.getDate() - 1);
-    const isYesterday =
-      date.getDate() === yesterday.getDate() &&
-      date.getMonth() === yesterday.getMonth() &&
-      date.getFullYear() === yesterday.getFullYear();
-
-    const timeStr = date.toLocaleTimeString([], {
-      hour: "numeric",
-      minute: "2-digit",
-      hour12: true,
-    });
-
-    if (isToday) return `today at ${timeStr}`;
-    if (isYesterday) return `yesterday at ${timeStr}`;
-
-    const dateStr = date.toLocaleDateString([], {
-      day: "numeric",
-      month: "short",
-    });
-    return `${dateStr} at ${timeStr}`;
-  } catch {
-    return fallbackStr || "recently";
+  if (status === "NOT_AVAILABLE") {
+    let text = "Not available";
+    if (user.not_available_to) {
+      try {
+        const d = new Date(user.not_available_to);
+        if (!isNaN(d.getTime())) {
+          const day = String(d.getDate()).padStart(2, "0");
+          const month = String(d.getMonth() + 1).padStart(2, "0");
+          const year = d.getFullYear();
+          text = `Not available till ${day}-${month}-${year}`;
+        }
+      } catch {}
+    }
+    return {
+      statusText: text,
+      colorClass: "text-rose-600 dark:text-rose-400 font-medium",
+      dotClass: "bg-rose-500",
+    };
   }
+  if (status === "BUSY") {
+    return { statusText: "Busy", colorClass: "text-red-500 font-medium", dotClass: "bg-red-500" };
+  }
+  if (status === "LUNCH") {
+    return { statusText: "Lunch", colorClass: "text-amber-500 font-medium", dotClass: "bg-amber-500" };
+  }
+  if (status === "BREAK") {
+    return { statusText: "Break", colorClass: "text-yellow-600 font-medium", dotClass: "bg-yellow-500" };
+  }
+  if (status === "OUTSIDE") {
+    return { statusText: "Outside", colorClass: "text-sky-500 font-medium", dotClass: "bg-sky-500" };
+  }
+  if (status === "OFF_DUTY") {
+    return { statusText: "Off-Duty", colorClass: "text-indigo-500 font-medium", dotClass: "bg-indigo-500" };
+  }
+  return { statusText: "Offline", colorClass: "text-slate-400 dark:text-slate-500 font-normal", dotClass: "bg-slate-400" };
 }
 
 export const LinkedInMessagingPage: React.FC<LinkedInMessagingPageProps> = ({
@@ -207,7 +221,7 @@ export const LinkedInMessagingPage: React.FC<LinkedInMessagingPageProps> = ({
   });
   const [isLoadingUsers, setIsLoadingUsers] = useState<boolean>(true);
 
-  // Selected peer for active conversation on the LEFT side (Starts as NULL so nothing auto-runs!)
+  // Selected peer for active conversation on the LEFT side (Starts as NULL, opens only on explicit click)
   const [selectedPeer, setSelectedPeer] = useState<ChatUser | null>(null);
   const [activeMessages, setActiveMessages] = useState<ChatMessage[]>([]);
   const [chatInput, setChatInput] = useState("");
@@ -215,7 +229,33 @@ export const LinkedInMessagingPage: React.FC<LinkedInMessagingPageProps> = ({
 
   // Right side filters & search
   const [searchQuery, setSearchQuery] = useState("");
-  const [directoryFilter, setDirectoryFilter] = useState<"ALL" | "ONLINE" | "UNREAD">("ALL");
+  const [directoryFilter, setDirectoryFilter] = useState<"ALL" | "ONLINE" | "UNREAD" | "ARCHIVED">("ALL");
+
+  // Pinned & Archived chat state (Persisted in localStorage)
+  const [pinnedUserIds, setPinnedUserIds] = useState<number[]>(() => {
+    if (typeof window === "undefined") return [];
+    try {
+      const p = localStorage.getItem(`erp_pinned_chats_${currentUser?.userId || 1}`);
+      return p ? JSON.parse(p) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const [archivedUserIds, setArchivedUserIds] = useState<number[]>(() => {
+    if (typeof window === "undefined") return [];
+    try {
+      const a = localStorage.getItem(`erp_archived_chats_${currentUser?.userId || 1}`);
+      return a ? JSON.parse(a) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  // Action popover state
+  const [openCardMenuId, setOpenCardMenuId] = useState<number | null>(null);
+  const [isChatHeaderMenuOpen, setIsChatHeaderMenuOpen] = useState(false);
+  const [deleteConfirmPeer, setDeleteConfirmPeer] = useState<ChatUser | null>(null);
 
   // Availability & Settings
   const [myAvailability, setMyAvailability] = useState<AvailabilityType>("ONLINE");
@@ -251,7 +291,84 @@ export const LinkedInMessagingPage: React.FC<LinkedInMessagingPageProps> = ({
 
   const currentUserId = actualMe?.id || currentUser?.userId || 1;
 
-  // Notification chime (Web Audio API)
+  // Save pinned / archived to localStorage
+  const handleTogglePin = (userId: number, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    setOpenCardMenuId(null);
+    setIsChatHeaderMenuOpen(false);
+    setPinnedUserIds((prev) => {
+      const next = prev.includes(userId) ? prev.filter((id) => id !== userId) : [...prev, userId];
+      try {
+        localStorage.setItem(`erp_pinned_chats_${currentUser?.userId || 1}`, JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+  };
+
+  const handleToggleArchive = (userId: number, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    setOpenCardMenuId(null);
+    setIsChatHeaderMenuOpen(false);
+    setArchivedUserIds((prev) => {
+      const next = prev.includes(userId) ? prev.filter((id) => id !== userId) : [...prev, userId];
+      try {
+        localStorage.setItem(`erp_archived_chats_${currentUser?.userId || 1}`, JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+    // If the active conversation was archived, close it
+    if (selectedPeer?.id === userId) {
+      setSelectedPeer(null);
+    }
+  };
+
+  // Mark chat as read or unread
+  const handleMarkChatRead = async (peer: ChatUser, isRead: boolean, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    setOpenCardMenuId(null);
+    setIsChatHeaderMenuOpen(false);
+    try {
+      await fetch(`${API_BASE}/api/client/${effectiveClientId}/chat/mark-read`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          user_id: currentUserId,
+          peer_id: peer.id,
+          is_read: isRead,
+        }),
+      });
+      // Optimistically update local state
+      setChatUsers((prev) =>
+        prev.map((u) => (u.id === peer.id ? { ...u, unread_count: isRead ? 0 : 1 } : u))
+      );
+      if (selectedPeer?.id === peer.id && !isRead) {
+        setSelectedPeer(null);
+      }
+    } catch {}
+  };
+
+  // Delete chat history
+  const handleConfirmDeleteChat = async () => {
+    if (!deleteConfirmPeer) return;
+    try {
+      await fetch(
+        `${API_BASE}/api/client/${effectiveClientId}/chat/messages?user_id=${currentUserId}&peer_id=${deleteConfirmPeer.id}`,
+        { method: "DELETE" }
+      );
+      if (selectedPeer?.id === deleteConfirmPeer.id) {
+        setActiveMessages([]);
+        setSelectedPeer(null);
+      }
+      setChatUsers((prev) =>
+        prev.map((u) => (u.id === deleteConfirmPeer.id ? { ...u, last_message: null, unread_count: 0 } : u))
+      );
+    } catch {}
+    setDeleteConfirmPeer(null);
+    setOpenCardMenuId(null);
+    setIsChatHeaderMenuOpen(false);
+  };
+
+  // Notification chime
   const playNotificationSound = useCallback(() => {
     try {
       const AudioContextClass =
@@ -268,7 +385,6 @@ export const LinkedInMessagingPage: React.FC<LinkedInMessagingPageProps> = ({
       }
 
       const now = ctx.currentTime;
-      // D5 note
       const osc1 = ctx.createOscillator();
       const gain1 = ctx.createGain();
       osc1.type = "sine";
@@ -280,7 +396,6 @@ export const LinkedInMessagingPage: React.FC<LinkedInMessagingPageProps> = ({
       osc1.start(now);
       osc1.stop(now + 0.22);
 
-      // A5 note
       const osc2 = ctx.createOscillator();
       const gain2 = ctx.createGain();
       osc2.type = "sine";
@@ -309,12 +424,14 @@ export const LinkedInMessagingPage: React.FC<LinkedInMessagingPageProps> = ({
     };
   }, []);
 
-  // Close dropdown on click outside
+  // Close menus on outside click
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
         setIsAvailabilityDropdownOpen(false);
       }
+      setOpenCardMenuId(null);
+      setIsChatHeaderMenuOpen(false);
     };
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
@@ -337,14 +454,12 @@ export const LinkedInMessagingPage: React.FC<LinkedInMessagingPageProps> = ({
           localStorage.setItem("erp_cached_chat_users", JSON.stringify(users));
         } catch {}
 
-        // Calculate total unread count across all peers
         const totalUnread = users.reduce(
           (sum, u) => sum + (u.id !== currentUserId ? u.unread_count || 0 : 0),
           0
         );
         onUnreadCountChange?.(totalUnread);
 
-        // Check for new incoming messages for sound chime
         if (!isFirstLoadRef.current) {
           for (const u of users) {
             const prev = prevUnreadMapRef.current[u.id] || 0;
@@ -362,13 +477,11 @@ export const LinkedInMessagingPage: React.FC<LinkedInMessagingPageProps> = ({
         });
         prevUnreadMapRef.current = unreadMap;
 
-        // Keep selected peer metadata updated if one is open
         if (selectedPeer) {
           const fresh = users.find((u) => u.id === selectedPeer.id);
           if (fresh) setSelectedPeer(fresh);
         }
 
-        // Sync own status
         const me = users.find(
           (u) =>
             (currentUser?.email && u.email && u.email.toLowerCase() === currentUser.email.toLowerCase()) ||
@@ -511,7 +624,7 @@ export const LinkedInMessagingPage: React.FC<LinkedInMessagingPageProps> = ({
       recipient_name: selectedPeer.full_name,
       content: text,
       created_at: new Date().toISOString(),
-      time_str: new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit", hour12: true }),
+      time_str: new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit", hour12: false }),
       date_str: "Today",
       is_read: false,
     };
@@ -545,7 +658,6 @@ export const LinkedInMessagingPage: React.FC<LinkedInMessagingPageProps> = ({
   const handleSelectPeer = (peer: ChatUser) => {
     setSelectedPeer(peer);
     setActiveMessages([]);
-    // Immediately clear local unread count for fast UI feedback
     setChatUsers((prev) =>
       prev.map((u) => (u.id === peer.id ? { ...u, unread_count: 0 } : u))
     );
@@ -599,13 +711,37 @@ export const LinkedInMessagingPage: React.FC<LinkedInMessagingPageProps> = ({
     } catch {}
   };
 
-  // Filtered directory list for RIGHT pane (accurately excludes current user)
+  // Filtered and SORTED directory list:
+  // 1. Pinned chats on top
+  // 2. Unread messages on top
+  // 3. Recent chats on top
+  // 4. Alphabetical fallback
   const filteredUsers = useMemo(() => {
     return chatUsers
       .filter((u) => {
         if (u.id === currentUserId) return false;
         if (currentUser?.email && u.email && u.email.toLowerCase() === currentUser.email.toLowerCase()) {
           return false;
+        }
+        return true;
+      })
+      .filter((u) => {
+        // Handle Archive filter:
+        const isArchived = archivedUserIds.includes(u.id);
+        if (directoryFilter === "ARCHIVED") {
+          return isArchived;
+        }
+        // In All / Online / Unread: hide archived contacts
+        if (isArchived) return false;
+
+        const isOffline = u.is_active === false || u.availability_status === "OFFLINE" || !u.availability_status;
+        const status = isOffline ? "OFFLINE" : u.availability_status;
+
+        if (directoryFilter === "ONLINE") {
+          return status === "ONLINE";
+        }
+        if (directoryFilter === "UNREAD") {
+          return (u.unread_count || 0) > 0;
         }
         return true;
       })
@@ -618,19 +754,30 @@ export const LinkedInMessagingPage: React.FC<LinkedInMessagingPageProps> = ({
           (u.email && u.email.toLowerCase().includes(q))
         );
       })
-      .filter((u) => {
-        const isOffline = u.is_active === false || u.availability_status === "OFFLINE" || !u.availability_status;
-        const status = isOffline ? "OFFLINE" : u.availability_status;
+      .sort((a, b) => {
+        // 1. Pinned chats on top
+        const aPinned = pinnedUserIds.includes(a.id);
+        const bPinned = pinnedUserIds.includes(b.id);
+        if (aPinned && !bPinned) return -1;
+        if (!aPinned && bPinned) return 1;
 
-        if (directoryFilter === "ONLINE") {
-          return status === "ONLINE";
-        }
-        if (directoryFilter === "UNREAD") {
-          return (u.unread_count || 0) > 0;
-        }
-        return true;
+        // 2. Unread messages on top
+        const aUnread = a.unread_count || 0;
+        const bUnread = b.unread_count || 0;
+        if (aUnread > 0 && bUnread === 0) return -1;
+        if (aUnread === 0 && bUnread > 0) return 1;
+        if (aUnread > 0 && bUnread > 0 && aUnread !== bUnread) return bUnread - aUnread;
+
+        // 3. Recent chats on top
+        const aHasMsg = Boolean(a.last_message);
+        const bHasMsg = Boolean(b.last_message);
+        if (aHasMsg && !bHasMsg) return -1;
+        if (!aHasMsg && bHasMsg) return 1;
+
+        // 4. Alphabetical fallback
+        return a.full_name.localeCompare(b.full_name);
       });
-  }, [chatUsers, currentUserId, currentUser, searchQuery, directoryFilter]);
+  }, [chatUsers, currentUserId, currentUser, searchQuery, directoryFilter, pinnedUserIds, archivedUserIds]);
 
   // Accurate online count (strictly status === "ONLINE" and active)
   const onlineCount = useMemo(() => {
@@ -645,17 +792,7 @@ export const LinkedInMessagingPage: React.FC<LinkedInMessagingPageProps> = ({
     return chatUsers.reduce((sum, u) => sum + (u.id !== currentUserId ? u.unread_count || 0 : 0), 0);
   }, [chatUsers, currentUserId]);
 
-  // Selected peer presence calculation
-  const peerPresence = useMemo(() => {
-    if (!selectedPeer) return null;
-    const isPeerOffline =
-      selectedPeer.is_active === false ||
-      selectedPeer.availability_status === "OFFLINE" ||
-      !selectedPeer.availability_status;
-    const status: AvailabilityType = isPeerOffline ? "OFFLINE" : selectedPeer.availability_status;
-    const cfg = AVAILABILITY_CONFIG[status] || AVAILABILITY_CONFIG.OFFLINE;
-    return { status, cfg };
-  }, [selectedPeer]);
+  const totalArchivedCount = archivedUserIds.length;
 
   return (
     <div className="w-full h-full min-h-[500px] max-w-7xl mx-auto flex flex-col md:flex-row bg-[var(--bg-card)] border border-[var(--border-color)] rounded-2xl shadow-sm overflow-hidden animate-in fade-in duration-150">
@@ -668,103 +805,162 @@ export const LinkedInMessagingPage: React.FC<LinkedInMessagingPageProps> = ({
           selectedPeer ? "flex" : "hidden md:flex"
         }`}
       >
-        {selectedPeer && peerPresence ? (
+        {selectedPeer ? (
           <>
             {/* 1. Chat Header */}
-            <header className="px-4 py-3 border-b border-[var(--border-color)] bg-[var(--bg-card)] flex items-center justify-between gap-3 shrink-0">
-              <div className="flex items-center gap-3 min-w-0">
-                {/* Mobile Back to People List */}
-                <button
-                  type="button"
-                  onClick={() => setSelectedPeer(null)}
-                  className="md:hidden p-1.5 -ml-1 rounded-xl text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-secondary)] cursor-pointer"
-                  title="Back to teammates"
-                >
-                  <ArrowLeft className="w-5 h-5" />
-                </button>
+            {(() => {
+              const peerStatus = getContactStatus(selectedPeer);
+              const isPinned = pinnedUserIds.includes(selectedPeer.id);
+              const isArchived = archivedUserIds.includes(selectedPeer.id);
 
-                {/* Peer Avatar & Status Ring */}
-                <div className="relative shrink-0">
-                  <div className="w-10 h-10 rounded-full bg-[var(--accent-color)] text-white font-bold text-xs flex items-center justify-center overflow-hidden shadow-xs ring-2 ring-[var(--border-color)]">
-                    {selectedPeer.avatar_url ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={selectedPeer.avatar_url}
-                        alt={selectedPeer.full_name}
-                        className="w-full h-full object-cover"
-                      />
-                    ) : (
-                      selectedPeer.full_name
-                        .split(" ")
-                        .map((n) => n[0])
-                        .join("")
-                        .slice(0, 2)
-                        .toUpperCase()
-                    )}
-                  </div>
-                  <span
-                    className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-white dark:border-slate-900 ${peerPresence.cfg.dotClass}`}
-                    title={peerPresence.cfg.label}
-                  />
-                </div>
-
-                {/* Peer Info & WhatsApp / Device Local Last Seen Presence */}
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2">
-                    <h3 className="text-sm font-bold text-[var(--text-primary)] truncate">
-                      {selectedPeer.full_name}
-                    </h3>
-                    <span
-                      className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold border ${peerPresence.cfg.badgeClass}`}
+              return (
+                <header className="px-4 py-3 border-b border-[var(--border-color)] bg-[var(--bg-card)] flex items-center justify-between gap-3 shrink-0">
+                  <div className="flex items-center gap-3 min-w-0">
+                    {/* Mobile Back to People List */}
+                    <button
+                      type="button"
+                      onClick={() => setSelectedPeer(null)}
+                      className="md:hidden p-1.5 -ml-1 rounded-xl text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-secondary)] cursor-pointer"
+                      title="Back to teammates"
                     >
-                      {peerPresence.cfg.label}
-                    </span>
+                      <ArrowLeft className="w-5 h-5" />
+                    </button>
+
+                    {/* Peer Avatar & Status Ring */}
+                    <div className="relative shrink-0">
+                      <div className="w-10 h-10 rounded-full bg-[var(--accent-color)] text-white font-bold text-xs flex items-center justify-center overflow-hidden shadow-xs ring-2 ring-[var(--border-color)]">
+                        {selectedPeer.avatar_url ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={selectedPeer.avatar_url}
+                            alt={selectedPeer.full_name}
+                            className="w-full h-full object-cover"
+                          />
+                        ) : (
+                          selectedPeer.full_name
+                            .split(" ")
+                            .map((n) => n[0])
+                            .join("")
+                            .slice(0, 2)
+                            .toUpperCase()
+                        )}
+                      </div>
+                      <span
+                        className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-white dark:border-slate-900 ${peerStatus.dotClass}`}
+                      />
+                    </div>
+
+                    {/* Next to Name - Show status (e.g. Rishikesh - Online, Mahesh - Not available till 30-11-2026) */}
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <h3 className="text-sm font-bold text-[var(--text-primary)] truncate">
+                          {selectedPeer.full_name} <span className="font-normal text-[var(--text-secondary)]">-</span>{" "}
+                          <span className={peerStatus.colorClass}>{peerStatus.statusText}</span>
+                        </h3>
+                        {isPinned && <Pin className="w-3.5 h-3.5 text-amber-500 fill-amber-500 shrink-0" />}
+                      </div>
+
+                      <p className="text-[11px] text-[var(--text-secondary)] truncate mt-0.5">
+                        {selectedPeer.role.replace(/_/g, " ")} • {selectedPeer.email}
+                      </p>
+                    </div>
                   </div>
 
-                  <p className="text-[11px] text-[var(--text-secondary)] flex items-center gap-1.5 truncate mt-0.5">
-                    {peerPresence.status === "ONLINE" ? (
-                      <span className="text-emerald-600 dark:text-emerald-400 font-semibold flex items-center gap-1">
-                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                        Online
-                      </span>
-                    ) : peerPresence.status === "OFFLINE" ? (
-                      <span>
-                        Last seen {formatLastSeen(selectedPeer.last_seen_at, selectedPeer.last_seen_str)}
-                      </span>
-                    ) : (
-                      <span>{peerPresence.cfg.label}</span>
-                    )}
-                    <span className="text-[var(--border-color)]">•</span>
-                    <span className="truncate">{selectedPeer.role.replace(/_/g, " ")}</span>
-                  </p>
-                </div>
-              </div>
+                  {/* Action Controls & More Options Menu */}
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <div
+                      title="End-to-end encrypted plant channel"
+                      className="hidden sm:flex items-center gap-1 px-2.5 py-1 rounded-lg bg-[var(--bg-secondary)] text-[var(--text-secondary)] text-[11px] font-medium"
+                    >
+                      <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
+                      <span>Encrypted Direct</span>
+                    </div>
 
-              {/* Action Controls & Close Active Chat */}
-              <div className="flex items-center gap-2 shrink-0">
-                <div
-                  title="End-to-end encrypted plant channel"
-                  className="hidden sm:flex items-center gap-1 px-2.5 py-1 rounded-lg bg-[var(--bg-secondary)] text-[var(--text-secondary)] text-[11px] font-medium"
-                >
-                  <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
-                  <span>Secure Direct</span>
-                </div>
-                {selectedPeer.disappearing_messages_ttl && selectedPeer.disappearing_messages_ttl !== "OFF" && (
-                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-600 border border-amber-500/20">
-                    TTL {selectedPeer.disappearing_messages_ttl}
-                  </span>
-                )}
-                {/* Close Active Chat button */}
-                <button
-                  type="button"
-                  onClick={() => setSelectedPeer(null)}
-                  title="Close conversation"
-                  className="p-1.5 rounded-xl text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-secondary)] cursor-pointer transition-colors"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-            </header>
+                    {/* 3-dots Menu for Chat Actions */}
+                    <div className="relative">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setIsChatHeaderMenuOpen((prev) => !prev);
+                        }}
+                        className="p-1.5 rounded-xl text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-secondary)] cursor-pointer transition-colors"
+                        title="Chat Options"
+                      >
+                        <MoreVertical className="w-4 h-4" />
+                      </button>
+
+                      {isChatHeaderMenuOpen && (
+                        <div
+                          onClick={(e) => e.stopPropagation()}
+                          className="absolute right-0 top-full mt-1 w-48 rounded-xl bg-[var(--bg-card)] border border-[var(--border-color)] shadow-xl z-50 py-1.5 animate-in fade-in zoom-in-95 duration-100 text-xs"
+                        >
+                          <button
+                            type="button"
+                            onClick={() => handleTogglePin(selectedPeer.id)}
+                            className="w-full px-3 py-2 text-left flex items-center gap-2 hover:bg-[var(--bg-secondary)] text-[var(--text-primary)] cursor-pointer"
+                          >
+                            <Pin className="w-3.5 h-3.5 text-amber-500" />
+                            <span>{isPinned ? "Unpin Chat" : "Pin Chat to Top"}</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => handleMarkChatRead(selectedPeer, false)}
+                            className="w-full px-3 py-2 text-left flex items-center gap-2 hover:bg-[var(--bg-secondary)] text-[var(--text-primary)] cursor-pointer"
+                          >
+                            <Mail className="w-3.5 h-3.5 text-blue-500" />
+                            <span>Mark as Unread</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => handleToggleArchive(selectedPeer.id)}
+                            className="w-full px-3 py-2 text-left flex items-center gap-2 hover:bg-[var(--bg-secondary)] text-[var(--text-primary)] cursor-pointer"
+                          >
+                            {isArchived ? (
+                              <>
+                                <ArchiveRestore className="w-3.5 h-3.5 text-indigo-500" />
+                                <span>Unarchive Chat</span>
+                              </>
+                            ) : (
+                              <>
+                                <Archive className="w-3.5 h-3.5 text-indigo-500" />
+                                <span>Archive Chat</span>
+                              </>
+                            )}
+                          </button>
+
+                          <div className="h-px bg-[var(--border-color)]/60 my-1" />
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setDeleteConfirmPeer(selectedPeer);
+                              setIsChatHeaderMenuOpen(false);
+                            }}
+                            className="w-full px-3 py-2 text-left flex items-center gap-2 hover:bg-rose-500/10 text-rose-600 cursor-pointer font-medium"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                            <span>Delete Chat</span>
+                          </button>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Close Active Chat button */}
+                    <button
+                      type="button"
+                      onClick={() => setSelectedPeer(null)}
+                      title="Close conversation"
+                      className="p-1.5 rounded-xl text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-secondary)] cursor-pointer transition-colors"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                </header>
+              );
+            })()}
 
             {/* 2. Messages Stream */}
             <div className="flex-1 overflow-y-auto p-4 space-y-3.5 bg-[var(--bg-secondary)]/20 custom-scrollbar">
@@ -880,7 +1076,7 @@ export const LinkedInMessagingPage: React.FC<LinkedInMessagingPageProps> = ({
             </footer>
           </>
         ) : (
-          /* Clean Empty / Idle State when no conversation is selected (Default State) */
+          /* Clean Enterprise Empty State (No consumer branding / no extra pills) */
           <div className="h-full flex flex-col items-center justify-center text-center p-8 space-y-4">
             <div className="w-16 h-16 rounded-3xl bg-[var(--accent-color)]/10 text-[var(--accent-color)] flex items-center justify-center shadow-inner">
               <MessageSquare className="w-8 h-8" />
@@ -890,12 +1086,8 @@ export const LinkedInMessagingPage: React.FC<LinkedInMessagingPageProps> = ({
                 Team Messaging & Operations Chat
               </h3>
               <p className="text-xs text-[var(--text-secondary)] leading-relaxed">
-                Click on any colleague from the team directory on the right to start messaging, coordinate shifts, and discuss site operations.
+                Select any colleague from the directory on the right to start messaging, coordinate shifts, and discuss site operations.
               </p>
-            </div>
-            <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-[var(--bg-secondary)] border border-[var(--border-color)] text-xs text-[var(--text-secondary)] font-medium">
-              <Sparkles className="w-3.5 h-3.5 text-amber-500" />
-              <span>Real-time presence & WhatsApp-style local time sync</span>
             </div>
           </div>
         )}
@@ -976,7 +1168,7 @@ export const LinkedInMessagingPage: React.FC<LinkedInMessagingPageProps> = ({
             </div>
           </div>
 
-          {/* Search Teammates (Fixed padding: pl-10 to prevent icon overlap!) */}
+          {/* Search Teammates */}
           <div className="relative">
             <Search className="w-4 h-4 text-[var(--text-secondary)] absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
             <input
@@ -997,8 +1189,8 @@ export const LinkedInMessagingPage: React.FC<LinkedInMessagingPageProps> = ({
             )}
           </div>
 
-          {/* Filter Pills */}
-          <div className="flex items-center gap-1.5 pt-0.5">
+          {/* Filter Pills with Archived Tab */}
+          <div className="flex items-center gap-1 pt-0.5">
             <button
               type="button"
               onClick={() => setDirectoryFilter("ALL")}
@@ -1008,7 +1200,7 @@ export const LinkedInMessagingPage: React.FC<LinkedInMessagingPageProps> = ({
                   : "bg-[var(--bg-secondary)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
               }`}
             >
-              All ({chatUsers.filter((u) => u.id !== currentUserId).length})
+              All ({chatUsers.filter((u) => u.id !== currentUserId && !archivedUserIds.includes(u.id)).length})
             </button>
             <button
               type="button"
@@ -1032,10 +1224,25 @@ export const LinkedInMessagingPage: React.FC<LinkedInMessagingPageProps> = ({
             >
               Unread {totalUnreadCount > 0 ? `(${totalUnreadCount})` : ""}
             </button>
+            {totalArchivedCount > 0 && (
+              <button
+                type="button"
+                onClick={() => setDirectoryFilter("ARCHIVED")}
+                className={`py-1 px-2 rounded-lg text-[10px] font-bold text-center transition-all cursor-pointer flex items-center justify-center gap-1 ${
+                  directoryFilter === "ARCHIVED"
+                    ? "bg-[var(--accent-color)] text-white shadow-2xs"
+                    : "bg-[var(--bg-secondary)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+                }`}
+                title="Archived Conversations"
+              >
+                <Archive className="w-3 h-3" />
+                <span>({totalArchivedCount})</span>
+              </button>
+            )}
           </div>
         </header>
 
-        {/* 2. Colleagues List */}
+        {/* 2. Colleagues List (Sorted: Pinned -> Unread -> Recent chats -> Alphabetical) */}
         <div className="flex-1 overflow-y-auto divide-y divide-[var(--border-color)]/60 custom-scrollbar">
           {isLoadingUsers && chatUsers.length === 0 ? (
             <div className="p-8 text-center text-xs text-[var(--text-secondary)]">
@@ -1044,31 +1251,29 @@ export const LinkedInMessagingPage: React.FC<LinkedInMessagingPageProps> = ({
           ) : filteredUsers.length === 0 ? (
             <div className="p-8 text-center space-y-2 text-[var(--text-secondary)]">
               <Users className="w-8 h-8 mx-auto opacity-40" />
-              <p className="text-xs font-bold text-[var(--text-primary)]">No contacts found</p>
-              <p className="text-[11px]">Try adjusting your search query or filters.</p>
+              <p className="text-xs font-bold text-[var(--text-primary)]">
+                {directoryFilter === "ARCHIVED" ? "No archived chats" : "No contacts found"}
+              </p>
+              <p className="text-[11px]">
+                {directoryFilter === "ARCHIVED"
+                  ? "Conversations you archive will appear here."
+                  : "Try adjusting your search query or filters."}
+              </p>
             </div>
           ) : (
             filteredUsers.map((user) => {
               const isSelected = selectedPeer?.id === user.id;
               const hasUnread = (user.unread_count || 0) > 0;
-
-              // Strictly accurate presence: offline if inactive or explicitly OFFLINE or unset
-              const isUserOffline =
-                user.is_active === false ||
-                user.availability_status === "OFFLINE" ||
-                !user.availability_status;
-              const effectiveStatus: AvailabilityType = isUserOffline
-                ? "OFFLINE"
-                : user.availability_status;
-              const cfg = AVAILABILITY_CONFIG[effectiveStatus] || AVAILABILITY_CONFIG.OFFLINE;
-              const isStrictlyOnline = effectiveStatus === "ONLINE";
+              const statusInfo = getContactStatus(user);
+              const isPinned = pinnedUserIds.includes(user.id);
+              const isArchived = archivedUserIds.includes(user.id);
+              const isMenuOpen = openCardMenuId === user.id;
 
               return (
-                <button
+                <div
                   key={user.id}
-                  type="button"
                   onClick={() => handleSelectPeer(user)}
-                  className={`w-full p-3 text-left transition-all flex items-start gap-3 cursor-pointer group ${
+                  className={`w-full p-3 text-left transition-all flex items-start gap-3 cursor-pointer group relative ${
                     isSelected
                       ? "bg-[var(--accent-light)]/60 border-l-4 border-l-[var(--accent-color)]"
                       : "hover:bg-[var(--bg-card)] border-l-4 border-l-transparent"
@@ -1094,30 +1299,31 @@ export const LinkedInMessagingPage: React.FC<LinkedInMessagingPageProps> = ({
                       )}
                     </div>
                     <span
-                      className={`absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full border-2 border-white dark:border-slate-900 ${cfg.dotClass}`}
-                      title={cfg.label}
+                      className={`absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full border-2 border-white dark:border-slate-900 ${statusInfo.dotClass}`}
                     />
                   </div>
 
-                  {/* Details */}
+                  {/* Details with Name - Status */}
                   <div className="flex-1 min-w-0 space-y-0.5">
                     <div className="flex items-center justify-between gap-1">
-                      <h4
-                        className={`text-xs truncate ${
-                          hasUnread ? "font-black text-[var(--text-primary)]" : "font-bold text-[var(--text-primary)]"
-                        }`}
-                      >
-                        {user.full_name}
-                      </h4>
-                      {user.last_message ? (
+                      {/* Name - Status (e.g. Rishikesh - Online, Mahesh - Not available till 30-11-2026) */}
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <h4
+                          className={`text-xs truncate ${
+                            hasUnread ? "font-black text-[var(--text-primary)]" : "font-bold text-[var(--text-primary)]"
+                          }`}
+                        >
+                          {user.full_name} <span className="font-normal text-[var(--text-secondary)]">-</span>{" "}
+                          <span className={statusInfo.colorClass}>{statusInfo.statusText}</span>
+                        </h4>
+                        {isPinned && <Pin className="w-3 h-3 text-amber-500 fill-amber-500 shrink-0" />}
+                      </div>
+
+                      {user.last_message && (
                         <span className="text-[10px] text-[var(--text-secondary)] whitespace-nowrap shrink-0">
                           {user.last_message.time_str}
                         </span>
-                      ) : isStrictlyOnline ? (
-                        <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold shrink-0">
-                          Online
-                        </span>
-                      ) : null}
+                      )}
                     </div>
 
                     <div className="flex items-center justify-between gap-1">
@@ -1126,28 +1332,149 @@ export const LinkedInMessagingPage: React.FC<LinkedInMessagingPageProps> = ({
                           <span className={hasUnread ? "font-bold text-[var(--text-primary)]" : ""}>
                             {user.last_message.content}
                           </span>
-                        ) : isStrictlyOnline ? (
-                          <span className="text-emerald-600 dark:text-emerald-400 font-medium">Online • {user.role.replace(/_/g, " ")}</span>
-                        ) : effectiveStatus === "OFFLINE" ? (
-                          <span>Last seen {formatLastSeen(user.last_seen_at, user.last_seen_str)} • {user.role.replace(/_/g, " ")}</span>
                         ) : (
-                          <span>{cfg.label} • {user.role.replace(/_/g, " ")}</span>
+                          <span>{user.role.replace(/_/g, " ")}</span>
                         )}
                       </p>
 
-                      {hasUnread && (
-                        <span className="px-1.5 py-0.2 rounded-full bg-rose-500 text-white font-black text-[9px] shrink-0 animate-pulse">
-                          {user.unread_count}
-                        </span>
-                      )}
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        {hasUnread && (
+                          <span className="px-1.5 py-0.2 rounded-full bg-rose-500 text-white font-black text-[9px] animate-pulse">
+                            {user.unread_count}
+                          </span>
+                        )}
+
+                        {/* 3-dots Context Menu Button */}
+                        <div className="relative">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setOpenCardMenuId(isMenuOpen ? null : user.id);
+                            }}
+                            className="p-1 rounded-md text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-secondary)] opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+                            title="More options"
+                          >
+                            <MoreVertical className="w-3.5 h-3.5" />
+                          </button>
+
+                          {/* Card Dropdown Menu */}
+                          {isMenuOpen && (
+                            <div
+                              onClick={(e) => e.stopPropagation()}
+                              className="absolute right-0 top-full mt-1 w-44 rounded-xl bg-[var(--bg-card)] border border-[var(--border-color)] shadow-2xl z-50 py-1 animate-in fade-in zoom-in-95 duration-100 text-[11px]"
+                            >
+                              <button
+                                type="button"
+                                onClick={(e) => handleTogglePin(user.id, e)}
+                                className="w-full px-3 py-1.5 text-left flex items-center gap-2 hover:bg-[var(--bg-secondary)] text-[var(--text-primary)] cursor-pointer"
+                              >
+                                <Pin className="w-3 h-3 text-amber-500" />
+                                <span>{isPinned ? "Unpin Chat" : "Pin to Top"}</span>
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={(e) => handleMarkChatRead(user, hasUnread, e)}
+                                className="w-full px-3 py-1.5 text-left flex items-center gap-2 hover:bg-[var(--bg-secondary)] text-[var(--text-primary)] cursor-pointer"
+                              >
+                                {hasUnread ? (
+                                  <>
+                                    <MailCheck className="w-3 h-3 text-emerald-500" />
+                                    <span>Mark as Read</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Mail className="w-3 h-3 text-blue-500" />
+                                    <span>Mark as Unread</span>
+                                  </>
+                                )}
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={(e) => handleToggleArchive(user.id, e)}
+                                className="w-full px-3 py-1.5 text-left flex items-center gap-2 hover:bg-[var(--bg-secondary)] text-[var(--text-primary)] cursor-pointer"
+                              >
+                                {isArchived ? (
+                                  <>
+                                    <ArchiveRestore className="w-3 h-3 text-indigo-500" />
+                                    <span>Unarchive</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Archive className="w-3 h-3 text-indigo-500" />
+                                    <span>Archive</span>
+                                  </>
+                                )}
+                              </button>
+
+                              <div className="h-px bg-[var(--border-color)]/60 my-1" />
+
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setDeleteConfirmPeer(user);
+                                  setOpenCardMenuId(null);
+                                }}
+                                className="w-full px-3 py-1.5 text-left flex items-center gap-2 hover:bg-rose-500/10 text-rose-600 cursor-pointer font-medium"
+                              >
+                                <Trash2 className="w-3 h-3" />
+                                <span>Delete Chat</span>
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      </div>
                     </div>
                   </div>
-                </button>
+                </div>
               );
             })
           )}
         </div>
       </aside>
+
+      {/* ========================================================================= */}
+      {/* DELETE CHAT CONFIRMATION MODAL                                            */}
+      {/* ========================================================================= */}
+      {deleteConfirmPeer && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-150">
+          <div className="w-full max-w-sm rounded-2xl bg-[var(--bg-card)] border border-[var(--border-color)] p-5 shadow-2xl space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-2xl bg-rose-500/10 text-rose-600 flex items-center justify-center shrink-0">
+                <Trash2 className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-[var(--text-primary)]">
+                  Delete Chat History?
+                </h3>
+                <p className="text-xs text-[var(--text-secondary)] mt-0.5">
+                  Permanently delete all messages with {deleteConfirmPeer.full_name}? This cannot be undone.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setDeleteConfirmPeer(null)}
+                className="px-3.5 py-2 rounded-xl bg-[var(--bg-secondary)] text-[var(--text-primary)] text-xs font-bold hover:bg-[var(--bg-card)] cursor-pointer transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDeleteChat}
+                className="px-4 py-2 rounded-xl bg-rose-600 text-white text-xs font-bold hover:bg-rose-700 cursor-pointer transition-colors shadow-sm"
+              >
+                Delete Chat
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ========================================================================= */}
       {/* NOT AVAILABLE MODAL                                                       */}

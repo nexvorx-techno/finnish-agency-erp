@@ -41,6 +41,12 @@ class TypingStatusRequest(BaseModel):
     is_typing: bool
 
 
+class MarkReadRequest(BaseModel):
+    user_id: int
+    peer_id: int
+    is_read: bool = True
+
+
 # Active typing tracking: key=(sender_id, recipient_id), value=datetime
 typing_sessions = {}
 
@@ -433,3 +439,73 @@ def send_internal_chat_message(
     db.refresh(new_msg)
 
     return serialize_message(new_msg)
+
+
+@router.post("/{client_id}/chat/mark-read")
+def mark_chat_read(
+    client_id: int,
+    payload: MarkReadRequest,
+    db: Session = Depends(get_db),
+):
+    """
+    Marks direct messages between user_id and peer_id as read or unread.
+    """
+    if payload.is_read:
+        db.query(InternalChatMessage).filter(
+            InternalChatMessage.client_id == client_id,
+            InternalChatMessage.portal_type == "CLIENT",
+            InternalChatMessage.channel_type == "DIRECT",
+            InternalChatMessage.recipient_id == payload.user_id,
+            InternalChatMessage.sender_id == payload.peer_id,
+            InternalChatMessage.is_read == False,
+        ).update({"is_read": True, "is_delivered": True}, synchronize_session=False)
+    else:
+        latest = (
+            db.query(InternalChatMessage)
+            .filter(
+                InternalChatMessage.client_id == client_id,
+                InternalChatMessage.portal_type == "CLIENT",
+                InternalChatMessage.channel_type == "DIRECT",
+                InternalChatMessage.recipient_id == payload.user_id,
+                InternalChatMessage.sender_id == payload.peer_id,
+            )
+            .order_by(InternalChatMessage.id.desc())
+            .first()
+        )
+        if latest:
+            latest.is_read = False
+    db.commit()
+    return {"status": "SUCCESS", "is_read": payload.is_read}
+
+
+@router.delete("/{client_id}/chat/messages")
+def delete_chat_history(
+    client_id: int,
+    user_id: int = Query(...),
+    peer_id: int = Query(...),
+    db: Session = Depends(get_db),
+):
+    """
+    Deletes entire direct conversation thread between user_id and peer_id.
+    """
+    deleted_count = (
+        db.query(InternalChatMessage)
+        .filter(
+            InternalChatMessage.client_id == client_id,
+            InternalChatMessage.portal_type == "CLIENT",
+            InternalChatMessage.channel_type == "DIRECT",
+            or_(
+                and_(
+                    InternalChatMessage.sender_id == user_id,
+                    InternalChatMessage.recipient_id == peer_id,
+                ),
+                and_(
+                    InternalChatMessage.sender_id == peer_id,
+                    InternalChatMessage.recipient_id == user_id,
+                ),
+            ),
+        )
+        .delete(synchronize_session=False)
+    )
+    db.commit()
+    return {"status": "DELETED", "deleted_count": deleted_count}

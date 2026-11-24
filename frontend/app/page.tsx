@@ -6,7 +6,6 @@ import { ClientHeader } from "../components/ClientHeader";
 import { ClientDashboard } from "../components/ClientDashboard";
 import { LiveWorkforceDashboard } from "../components/LiveWorkforceDashboard";
 import { TalentAcquisitionModule } from "../components/TalentAcquisitionModule";
-import { RightRail } from "../components/RightRail";
 import { BottomNavBar } from "../components/BottomNavBar";
 import { PreferencesModal, MenuPositionType } from "../components/PreferencesModal";
 import { SupervisorAdjustmentModal } from "../components/SupervisorAdjustmentModal";
@@ -152,6 +151,26 @@ export default function ClientPortalPage() {
     }, 600);
     return () => clearTimeout(timer);
   }, []);
+
+  // Background poll for top bar unread messages badge (every 12 seconds)
+  useEffect(() => {
+    if (!currentUser?.clientId) return;
+    const fetchTopBarUnread = async () => {
+      try {
+        const uid = currentUser.userId;
+        const res = await fetch(`${API_BASE}/api/client/${currentUser.clientId}/chat/users?current_user_id=${uid}`);
+        if (res.ok) {
+          const data = await res.json();
+          const users = data.users || [];
+          const count = users.reduce((sum: number, u: { id: number; unread_count?: number }) => sum + (u.id !== uid ? (u.unread_count || 0) : 0), 0);
+          setUnreadChatCount(count);
+        }
+      } catch {}
+    };
+    fetchTopBarUnread();
+    const interval = setInterval(fetchTopBarUnread, 12000);
+    return () => clearInterval(interval);
+  }, [currentUser?.clientId, currentUser?.userId]);
 
   const triggerLoader = useCallback((duration = 600) => {
     if (loaderTimeoutRef.current) {
@@ -920,17 +939,7 @@ export default function ClientPortalPage() {
         </main>
       </div>
 
-      {/* 3. Internal Portal Chat Right Rail (Floating docked widget, hidden on dedicated full messaging page) */}
-      {activeModule !== "messaging" && (
-        <RightRail
-          clientId={currentUser.clientId || 1}
-          companyName={summary.client_name}
-          currentUser={currentUser}
-          onUnreadCountChange={setUnreadChatCount}
-        />
-      )}
-
-      {/* 4. Bottom Side Bar (Rendered when menuPosition === 'bottom' on desktop only) */}
+      {/* 3. Bottom Side Bar (Rendered when menuPosition === 'bottom' on desktop only) */}
       {menuPosition === "bottom" && (
         <div className="hidden lg:block">
           <BottomNavBar
