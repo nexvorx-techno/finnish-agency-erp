@@ -235,7 +235,9 @@ export const LinkedInMessagingPage: React.FC<LinkedInMessagingPageProps> = ({
   const [pinnedUserIds, setPinnedUserIds] = useState<number[]>(() => {
     if (typeof window === "undefined") return [];
     try {
-      const p = localStorage.getItem(`erp_pinned_chats_${currentUser?.userId || 1}`);
+      const p =
+        localStorage.getItem(`erp_pinned_chats_${currentUser?.userId || 1}`) ||
+        localStorage.getItem("erp_pinned_chats");
       return p ? JSON.parse(p) : [];
     } catch {
       return [];
@@ -245,7 +247,9 @@ export const LinkedInMessagingPage: React.FC<LinkedInMessagingPageProps> = ({
   const [archivedUserIds, setArchivedUserIds] = useState<number[]>(() => {
     if (typeof window === "undefined") return [];
     try {
-      const a = localStorage.getItem(`erp_archived_chats_${currentUser?.userId || 1}`);
+      const a =
+        localStorage.getItem(`erp_archived_chats_${currentUser?.userId || 1}`) ||
+        localStorage.getItem("erp_archived_chats");
       return a ? JSON.parse(a) : [];
     } catch {
       return [];
@@ -291,28 +295,53 @@ export const LinkedInMessagingPage: React.FC<LinkedInMessagingPageProps> = ({
 
   const currentUserId = actualMe?.id || currentUser?.userId || 1;
 
+  // Sync pinned and archived chats whenever user identity changes
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const p =
+        localStorage.getItem(`erp_pinned_chats_${currentUserId}`) ||
+        localStorage.getItem("erp_pinned_chats");
+      if (p) setPinnedUserIds(JSON.parse(p));
+      const a =
+        localStorage.getItem(`erp_archived_chats_${currentUserId}`) ||
+        localStorage.getItem("erp_archived_chats");
+      if (a) setArchivedUserIds(JSON.parse(a));
+    } catch {}
+  }, [currentUserId]);
+
   // Save pinned / archived to localStorage
   const handleTogglePin = (userId: number, e?: React.MouseEvent) => {
-    e?.stopPropagation();
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
     setOpenCardMenuId(null);
     setIsChatHeaderMenuOpen(false);
     setPinnedUserIds((prev) => {
-      const next = prev.includes(userId) ? prev.filter((id) => id !== userId) : [...prev, userId];
+      const isPinned = prev.includes(userId);
+      const next = isPinned ? prev.filter((id) => id !== userId) : [userId, ...prev];
       try {
-        localStorage.setItem(`erp_pinned_chats_${currentUser?.userId || 1}`, JSON.stringify(next));
+        localStorage.setItem(`erp_pinned_chats_${currentUserId}`, JSON.stringify(next));
+        localStorage.setItem("erp_pinned_chats", JSON.stringify(next));
       } catch {}
       return next;
     });
   };
 
   const handleToggleArchive = (userId: number, e?: React.MouseEvent) => {
-    e?.stopPropagation();
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
     setOpenCardMenuId(null);
     setIsChatHeaderMenuOpen(false);
     setArchivedUserIds((prev) => {
-      const next = prev.includes(userId) ? prev.filter((id) => id !== userId) : [...prev, userId];
+      const isArchived = prev.includes(userId);
+      const next = isArchived ? prev.filter((id) => id !== userId) : [...prev, userId];
       try {
-        localStorage.setItem(`erp_archived_chats_${currentUser?.userId || 1}`, JSON.stringify(next));
+        localStorage.setItem(`erp_archived_chats_${currentUserId}`, JSON.stringify(next));
+        localStorage.setItem("erp_archived_chats", JSON.stringify(next));
       } catch {}
       return next;
     });
@@ -424,11 +453,16 @@ export const LinkedInMessagingPage: React.FC<LinkedInMessagingPageProps> = ({
     };
   }, []);
 
-  // Close menus on outside click
+  // Close menus on outside click (avoid closing prematurely if clicking inside a menu container)
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+      const target = e.target as HTMLElement | null;
+      if (!target) return;
+      if (dropdownRef.current && !dropdownRef.current.contains(target)) {
         setIsAvailabilityDropdownOpen(false);
+      }
+      if (target.closest && target.closest("[data-menu-container]")) {
+        return;
       }
       setOpenCardMenuId(null);
       setIsChatHeaderMenuOpen(false);
@@ -755,11 +789,14 @@ export const LinkedInMessagingPage: React.FC<LinkedInMessagingPageProps> = ({
         );
       })
       .sort((a, b) => {
-        // 1. Pinned chats on top
+        // 1. Pinned chats on top (ordered by most recently pinned)
         const aPinned = pinnedUserIds.includes(a.id);
         const bPinned = pinnedUserIds.includes(b.id);
         if (aPinned && !bPinned) return -1;
         if (!aPinned && bPinned) return 1;
+        if (aPinned && bPinned) {
+          return pinnedUserIds.indexOf(a.id) - pinnedUserIds.indexOf(b.id);
+        }
 
         // 2. Unread messages on top
         const aUnread = a.unread_count || 0;
@@ -876,8 +913,22 @@ export const LinkedInMessagingPage: React.FC<LinkedInMessagingPageProps> = ({
                       <span>Encrypted Direct</span>
                     </div>
 
+                    {/* Direct 1-Click Pin Button in Chat Header */}
+                    <button
+                      type="button"
+                      onClick={(e) => handleTogglePin(selectedPeer.id, e)}
+                      title={isPinned ? "Unpin Chat" : "Pin Chat to Top"}
+                      className={`p-1.5 rounded-xl transition-all cursor-pointer ${
+                        isPinned
+                          ? "bg-amber-500/15 text-amber-600 dark:text-amber-400 font-bold ring-1 ring-amber-500/30"
+                          : "text-[var(--text-secondary)] hover:text-amber-500 hover:bg-[var(--bg-secondary)]"
+                      }`}
+                    >
+                      <Pin className={`w-4 h-4 ${isPinned ? "fill-amber-500 text-amber-500" : ""}`} />
+                    </button>
+
                     {/* 3-dots Menu for Chat Actions */}
-                    <div className="relative">
+                    <div data-menu-container="true" className="relative">
                       <button
                         type="button"
                         onClick={(e) => {
@@ -897,7 +948,7 @@ export const LinkedInMessagingPage: React.FC<LinkedInMessagingPageProps> = ({
                         >
                           <button
                             type="button"
-                            onClick={() => handleTogglePin(selectedPeer.id)}
+                            onClick={(e) => handleTogglePin(selectedPeer.id, e)}
                             className="w-full px-3 py-2 text-left flex items-center gap-2 hover:bg-[var(--bg-secondary)] text-[var(--text-primary)] cursor-pointer"
                           >
                             <Pin className="w-3.5 h-3.5 text-amber-500" />
@@ -1276,6 +1327,8 @@ export const LinkedInMessagingPage: React.FC<LinkedInMessagingPageProps> = ({
                   className={`w-full p-3 text-left transition-all flex items-start gap-3 cursor-pointer group relative ${
                     isSelected
                       ? "bg-[var(--accent-light)]/60 border-l-4 border-l-[var(--accent-color)]"
+                      : isPinned
+                      ? "bg-amber-500/5 hover:bg-amber-500/10 border-l-4 border-l-amber-500"
                       : "hover:bg-[var(--bg-card)] border-l-4 border-l-transparent"
                   }`}
                 >
@@ -1307,7 +1360,7 @@ export const LinkedInMessagingPage: React.FC<LinkedInMessagingPageProps> = ({
                   <div className="flex-1 min-w-0 space-y-0.5">
                     <div className="flex items-center justify-between gap-1">
                       {/* Name - Status (e.g. Rishikesh - Online, Mahesh - Not available till 30-11-2026) */}
-                      <div className="flex items-center gap-1.5 min-w-0">
+                      <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
                         <h4
                           className={`text-xs truncate ${
                             hasUnread ? "font-black text-[var(--text-primary)]" : "font-bold text-[var(--text-primary)]"
@@ -1316,7 +1369,15 @@ export const LinkedInMessagingPage: React.FC<LinkedInMessagingPageProps> = ({
                           {user.full_name} <span className="font-normal text-[var(--text-secondary)]">-</span>{" "}
                           <span className={statusInfo.colorClass}>{statusInfo.statusText}</span>
                         </h4>
-                        {isPinned && <Pin className="w-3 h-3 text-amber-500 fill-amber-500 shrink-0" />}
+                        {isPinned && (
+                          <span
+                            title="Pinned conversation"
+                            className="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded bg-amber-500/15 text-amber-600 dark:text-amber-400 font-bold text-[9px] border border-amber-500/30 shrink-0"
+                          >
+                            <Pin className="w-2.5 h-2.5 fill-amber-500 text-amber-500" />
+                            <span>Pinned</span>
+                          </span>
+                        )}
                       </div>
 
                       {user.last_message && (
@@ -1344,8 +1405,22 @@ export const LinkedInMessagingPage: React.FC<LinkedInMessagingPageProps> = ({
                           </span>
                         )}
 
+                        {/* Direct 1-Click Pin Button */}
+                        <button
+                          type="button"
+                          onClick={(e) => handleTogglePin(user.id, e)}
+                          title={isPinned ? "Unpin Chat" : "Pin Chat to Top"}
+                          className={`p-1 rounded-md transition-all cursor-pointer ${
+                            isPinned
+                              ? "text-amber-500 opacity-100 hover:text-amber-600"
+                              : "text-[var(--text-secondary)] hover:text-amber-500 opacity-0 group-hover:opacity-100"
+                          }`}
+                        >
+                          <Pin className={`w-3.5 h-3.5 ${isPinned ? "fill-amber-500 text-amber-500" : ""}`} />
+                        </button>
+
                         {/* 3-dots Context Menu Button */}
-                        <div className="relative">
+                        <div data-menu-container="true" className="relative">
                           <button
                             type="button"
                             onClick={(e) => {
