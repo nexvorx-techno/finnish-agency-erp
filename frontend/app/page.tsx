@@ -752,9 +752,13 @@ export default function ClientPortalPage() {
 
         {/* Scrollable Canvas */}
         <main
-          className={`flex-1 overflow-y-auto transition-colors ${
-            activeModule === "messaging" ? "p-2 sm:p-4 h-full flex flex-col" : "p-3.5 sm:p-6 lg:p-8"
-          } ${menuPosition === "bottom" ? "lg:pb-32 pb-6" : ""}`}
+          className={`flex-1 min-h-0 overflow-y-auto transition-colors ${
+            activeModule === "messaging"
+              ? menuPosition === "bottom"
+                ? "p-2 sm:p-4 pb-24 lg:pb-28 h-[calc(100vh-3.5rem)] flex flex-col"
+                : "p-2 sm:p-4 h-[calc(100vh-3.5rem)] flex flex-col"
+              : `p-3.5 sm:p-6 lg:p-8 ${menuPosition === "bottom" ? "lg:pb-32 pb-6" : ""}`
+          }`}
         >
           {activeModule === "dashboard" ? (
             <ClientDashboard

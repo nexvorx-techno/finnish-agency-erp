@@ -207,7 +207,7 @@ export const LinkedInMessagingPage: React.FC<LinkedInMessagingPageProps> = ({
   });
   const [isLoadingUsers, setIsLoadingUsers] = useState<boolean>(true);
 
-  // Selected peer for active conversation on the LEFT side
+  // Selected peer for active conversation on the LEFT side (Starts as NULL so nothing auto-runs!)
   const [selectedPeer, setSelectedPeer] = useState<ChatUser | null>(null);
   const [activeMessages, setActiveMessages] = useState<ChatMessage[]>([]);
   const [chatInput, setChatInput] = useState("");
@@ -226,9 +226,6 @@ export const LinkedInMessagingPage: React.FC<LinkedInMessagingPageProps> = ({
     to: "",
     reason: "",
   });
-
-  // Disappearing messages
-  const [disappearingTtl, setDisappearingTtl] = useState<DisappearingTtl>("OFF");
 
   // Audio Context chime & refs
   const audioCtxRef = useRef<AudioContext | null>(null);
@@ -365,7 +362,7 @@ export const LinkedInMessagingPage: React.FC<LinkedInMessagingPageProps> = ({
         });
         prevUnreadMapRef.current = unreadMap;
 
-        // Keep selected peer metadata updated if selected
+        // Keep selected peer metadata updated if one is open
         if (selectedPeer) {
           const fresh = users.find((u) => u.id === selectedPeer.id);
           if (fresh) setSelectedPeer(fresh);
@@ -384,7 +381,6 @@ export const LinkedInMessagingPage: React.FC<LinkedInMessagingPageProps> = ({
             to: me.not_available_to || "",
             reason: me.not_available_reason || "",
           });
-          setDisappearingTtl(me.disappearing_messages_ttl || "OFF");
         }
       }
     } catch {
@@ -545,7 +541,7 @@ export const LinkedInMessagingPage: React.FC<LinkedInMessagingPageProps> = ({
     } catch {}
   };
 
-  // Select user to chat with
+  // Select user to chat with (Triggered only when the user explicitly clicks a colleague)
   const handleSelectPeer = (peer: ChatUser) => {
     setSelectedPeer(peer);
     setActiveMessages([]);
@@ -603,10 +599,16 @@ export const LinkedInMessagingPage: React.FC<LinkedInMessagingPageProps> = ({
     } catch {}
   };
 
-  // Filtered directory list for RIGHT pane
+  // Filtered directory list for RIGHT pane (accurately excludes current user)
   const filteredUsers = useMemo(() => {
     return chatUsers
-      .filter((u) => u.id !== currentUserId)
+      .filter((u) => {
+        if (u.id === currentUserId) return false;
+        if (currentUser?.email && u.email && u.email.toLowerCase() === currentUser.email.toLowerCase()) {
+          return false;
+        }
+        return true;
+      })
       .filter((u) => {
         if (!searchQuery.trim()) return true;
         const q = searchQuery.toLowerCase();
@@ -617,33 +619,46 @@ export const LinkedInMessagingPage: React.FC<LinkedInMessagingPageProps> = ({
         );
       })
       .filter((u) => {
+        const isOffline = u.is_active === false || u.availability_status === "OFFLINE" || !u.availability_status;
+        const status = isOffline ? "OFFLINE" : u.availability_status;
+
         if (directoryFilter === "ONLINE") {
-          return u.availability_status === "ONLINE" || u.is_active;
+          return status === "ONLINE";
         }
         if (directoryFilter === "UNREAD") {
           return (u.unread_count || 0) > 0;
         }
         return true;
       });
-  }, [chatUsers, currentUserId, searchQuery, directoryFilter]);
+  }, [chatUsers, currentUserId, currentUser, searchQuery, directoryFilter]);
 
+  // Accurate online count (strictly status === "ONLINE" and active)
   const onlineCount = useMemo(() => {
-    return chatUsers.filter((u) => u.id !== currentUserId && (u.availability_status === "ONLINE" || u.is_active)).length;
-  }, [chatUsers, currentUserId]);
+    return chatUsers.filter((u) => {
+      if (u.id === currentUserId) return false;
+      if (currentUser?.email && u.email && u.email.toLowerCase() === currentUser.email.toLowerCase()) return false;
+      return u.is_active !== false && u.availability_status === "ONLINE";
+    }).length;
+  }, [chatUsers, currentUserId, currentUser]);
 
   const totalUnreadCount = useMemo(() => {
     return chatUsers.reduce((sum, u) => sum + (u.id !== currentUserId ? u.unread_count || 0 : 0), 0);
   }, [chatUsers, currentUserId]);
 
-  // Auto-select first contact on wide screens if none selected and users loaded
-  useEffect(() => {
-    if (!selectedPeer && filteredUsers.length > 0 && typeof window !== "undefined" && window.innerWidth >= 1024) {
-      setSelectedPeer(filteredUsers[0]);
-    }
-  }, [filteredUsers, selectedPeer]);
+  // Selected peer presence calculation
+  const peerPresence = useMemo(() => {
+    if (!selectedPeer) return null;
+    const isPeerOffline =
+      selectedPeer.is_active === false ||
+      selectedPeer.availability_status === "OFFLINE" ||
+      !selectedPeer.availability_status;
+    const status: AvailabilityType = isPeerOffline ? "OFFLINE" : selectedPeer.availability_status;
+    const cfg = AVAILABILITY_CONFIG[status] || AVAILABILITY_CONFIG.OFFLINE;
+    return { status, cfg };
+  }, [selectedPeer]);
 
   return (
-    <div className="w-full h-[calc(100vh-6.5rem)] max-w-7xl mx-auto flex flex-col md:flex-row bg-[var(--bg-card)] border border-[var(--border-color)] rounded-2xl shadow-sm overflow-hidden animate-in fade-in duration-200">
+    <div className="w-full h-full min-h-[500px] max-w-7xl mx-auto flex flex-col md:flex-row bg-[var(--bg-card)] border border-[var(--border-color)] rounded-2xl shadow-sm overflow-hidden animate-in fade-in duration-150">
       
       {/* ========================================================================= */}
       {/* LEFT SIDE: ACTIVE CHAT SCREEN (Full Conversation Thread)                  */}
@@ -653,7 +668,7 @@ export const LinkedInMessagingPage: React.FC<LinkedInMessagingPageProps> = ({
           selectedPeer ? "flex" : "hidden md:flex"
         }`}
       >
-        {selectedPeer ? (
+        {selectedPeer && peerPresence ? (
           <>
             {/* 1. Chat Header */}
             <header className="px-4 py-3 border-b border-[var(--border-color)] bg-[var(--bg-card)] flex items-center justify-between gap-3 shrink-0">
@@ -662,7 +677,7 @@ export const LinkedInMessagingPage: React.FC<LinkedInMessagingPageProps> = ({
                 <button
                   type="button"
                   onClick={() => setSelectedPeer(null)}
-                  className="md:hidden p-1.5 -ml-1 rounded-xl text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-secondary)]"
+                  className="md:hidden p-1.5 -ml-1 rounded-xl text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-secondary)] cursor-pointer"
                   title="Back to teammates"
                 >
                   <ArrowLeft className="w-5 h-5" />
@@ -688,9 +703,8 @@ export const LinkedInMessagingPage: React.FC<LinkedInMessagingPageProps> = ({
                     )}
                   </div>
                   <span
-                    className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-white dark:border-slate-900 ${
-                      AVAILABILITY_CONFIG[selectedPeer.availability_status]?.dotClass || "bg-slate-400"
-                    }`}
+                    className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-white dark:border-slate-900 ${peerPresence.cfg.dotClass}`}
+                    title={peerPresence.cfg.label}
                   />
                 </div>
 
@@ -701,33 +715,33 @@ export const LinkedInMessagingPage: React.FC<LinkedInMessagingPageProps> = ({
                       {selectedPeer.full_name}
                     </h3>
                     <span
-                      className={`hidden sm:inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold border ${
-                        AVAILABILITY_CONFIG[selectedPeer.availability_status]?.badgeClass || ""
-                      }`}
+                      className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold border ${peerPresence.cfg.badgeClass}`}
                     >
-                      {AVAILABILITY_CONFIG[selectedPeer.availability_status]?.label}
+                      {peerPresence.cfg.label}
                     </span>
                   </div>
 
-                  <p className="text-[11px] text-[var(--text-secondary)] flex items-center gap-1.5 truncate">
-                    {selectedPeer.availability_status === "ONLINE" ? (
+                  <p className="text-[11px] text-[var(--text-secondary)] flex items-center gap-1.5 truncate mt-0.5">
+                    {peerPresence.status === "ONLINE" ? (
                       <span className="text-emerald-600 dark:text-emerald-400 font-semibold flex items-center gap-1">
                         <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
                         Online
                       </span>
-                    ) : (
+                    ) : peerPresence.status === "OFFLINE" ? (
                       <span>
                         Last seen {formatLastSeen(selectedPeer.last_seen_at, selectedPeer.last_seen_str)}
                       </span>
+                    ) : (
+                      <span>{peerPresence.cfg.label}</span>
                     )}
                     <span className="text-[var(--border-color)]">•</span>
-                    <span className="truncate">{selectedPeer.role}</span>
+                    <span className="truncate">{selectedPeer.role.replace(/_/g, " ")}</span>
                   </p>
                 </div>
               </div>
 
-              {/* Action Controls */}
-              <div className="flex items-center gap-1 shrink-0">
+              {/* Action Controls & Close Active Chat */}
+              <div className="flex items-center gap-2 shrink-0">
                 <div
                   title="End-to-end encrypted plant channel"
                   className="hidden sm:flex items-center gap-1 px-2.5 py-1 rounded-lg bg-[var(--bg-secondary)] text-[var(--text-secondary)] text-[11px] font-medium"
@@ -735,11 +749,20 @@ export const LinkedInMessagingPage: React.FC<LinkedInMessagingPageProps> = ({
                   <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
                   <span>Secure Direct</span>
                 </div>
-                {disappearingTtl !== "OFF" && (
+                {selectedPeer.disappearing_messages_ttl && selectedPeer.disappearing_messages_ttl !== "OFF" && (
                   <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-600 border border-amber-500/20">
-                    TTL {disappearingTtl}
+                    TTL {selectedPeer.disappearing_messages_ttl}
                   </span>
                 )}
+                {/* Close Active Chat button */}
+                <button
+                  type="button"
+                  onClick={() => setSelectedPeer(null)}
+                  title="Close conversation"
+                  className="p-1.5 rounded-xl text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-secondary)] cursor-pointer transition-colors"
+                >
+                  <X className="w-4 h-4" />
+                </button>
               </div>
             </header>
 
@@ -857,7 +880,7 @@ export const LinkedInMessagingPage: React.FC<LinkedInMessagingPageProps> = ({
             </footer>
           </>
         ) : (
-          /* Empty State when no conversation selected */
+          /* Clean Empty / Idle State when no conversation is selected (Default State) */
           <div className="h-full flex flex-col items-center justify-center text-center p-8 space-y-4">
             <div className="w-16 h-16 rounded-3xl bg-[var(--accent-color)]/10 text-[var(--accent-color)] flex items-center justify-center shadow-inner">
               <MessageSquare className="w-8 h-8" />
@@ -867,12 +890,12 @@ export const LinkedInMessagingPage: React.FC<LinkedInMessagingPageProps> = ({
                 Team Messaging & Operations Chat
               </h3>
               <p className="text-xs text-[var(--text-secondary)] leading-relaxed">
-                Connect directly with site supervisors, plant managers, and workforce coordinators. Select a teammate from the directory on the right to start messaging.
+                Click on any colleague from the team directory on the right to start messaging, coordinate shifts, and discuss site operations.
               </p>
             </div>
             <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-[var(--bg-secondary)] border border-[var(--border-color)] text-xs text-[var(--text-secondary)] font-medium">
               <Sparkles className="w-3.5 h-3.5 text-amber-500" />
-              <span>Real-time presence & fast sync enabled</span>
+              <span>Real-time presence & WhatsApp-style local time sync</span>
             </div>
           </div>
         )}
@@ -894,9 +917,13 @@ export const LinkedInMessagingPage: React.FC<LinkedInMessagingPageProps> = ({
                 <Users className="w-4 h-4 text-[var(--accent-color)]" />
                 <span>Teammates</span>
               </h2>
-              {onlineCount > 0 && (
+              {onlineCount > 0 ? (
                 <span className="px-2 py-0.2 rounded-full bg-emerald-500/10 text-emerald-600 text-[10px] font-bold border border-emerald-500/20">
                   {onlineCount} online
+                </span>
+              ) : (
+                <span className="px-2 py-0.2 rounded-full bg-slate-500/10 text-slate-500 text-[10px] font-medium border border-slate-500/20">
+                  0 online
                 </span>
               )}
             </div>
@@ -949,23 +976,23 @@ export const LinkedInMessagingPage: React.FC<LinkedInMessagingPageProps> = ({
             </div>
           </div>
 
-          {/* Search Teammates */}
+          {/* Search Teammates (Fixed padding: pl-10 to prevent icon overlap!) */}
           <div className="relative">
-            <Search className="w-3.5 h-3.5 text-[var(--text-secondary)] absolute left-3 top-1/2 -translate-y-1/2" />
+            <Search className="w-4 h-4 text-[var(--text-secondary)] absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
             <input
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search by name, role or email..."
-              className="w-full pl-8.5 pr-3 py-1.5 rounded-xl bg-[var(--bg-secondary)] border border-[var(--border-color)] text-xs text-[var(--text-primary)] placeholder-[var(--text-secondary)] focus:outline-none focus:border-[var(--accent-color)] transition-all"
+              className="w-full pl-10 pr-8 py-2 rounded-xl bg-[var(--bg-secondary)] border border-[var(--border-color)] text-xs text-[var(--text-primary)] placeholder-[var(--text-secondary)] focus:outline-none focus:border-[var(--accent-color)] transition-all"
             />
             {searchQuery && (
               <button
                 type="button"
                 onClick={() => setSearchQuery("")}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[var(--text-secondary)] hover:text-[var(--text-primary)] cursor-pointer"
               >
-                <X className="w-3 h-3" />
+                <X className="w-3.5 h-3.5" />
               </button>
             )}
           </div>
@@ -1024,7 +1051,17 @@ export const LinkedInMessagingPage: React.FC<LinkedInMessagingPageProps> = ({
             filteredUsers.map((user) => {
               const isSelected = selectedPeer?.id === user.id;
               const hasUnread = (user.unread_count || 0) > 0;
-              const isOnline = user.availability_status === "ONLINE" || user.is_active;
+
+              // Strictly accurate presence: offline if inactive or explicitly OFFLINE or unset
+              const isUserOffline =
+                user.is_active === false ||
+                user.availability_status === "OFFLINE" ||
+                !user.availability_status;
+              const effectiveStatus: AvailabilityType = isUserOffline
+                ? "OFFLINE"
+                : user.availability_status;
+              const cfg = AVAILABILITY_CONFIG[effectiveStatus] || AVAILABILITY_CONFIG.OFFLINE;
+              const isStrictlyOnline = effectiveStatus === "ONLINE";
 
               return (
                 <button
@@ -1057,9 +1094,8 @@ export const LinkedInMessagingPage: React.FC<LinkedInMessagingPageProps> = ({
                       )}
                     </div>
                     <span
-                      className={`absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full border-2 border-white dark:border-slate-900 ${
-                        AVAILABILITY_CONFIG[user.availability_status]?.dotClass || "bg-slate-400"
-                      }`}
+                      className={`absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full border-2 border-white dark:border-slate-900 ${cfg.dotClass}`}
+                      title={cfg.label}
                     />
                   </div>
 
@@ -1077,7 +1113,7 @@ export const LinkedInMessagingPage: React.FC<LinkedInMessagingPageProps> = ({
                         <span className="text-[10px] text-[var(--text-secondary)] whitespace-nowrap shrink-0">
                           {user.last_message.time_str}
                         </span>
-                      ) : isOnline ? (
+                      ) : isStrictlyOnline ? (
                         <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold shrink-0">
                           Online
                         </span>
@@ -1090,8 +1126,12 @@ export const LinkedInMessagingPage: React.FC<LinkedInMessagingPageProps> = ({
                           <span className={hasUnread ? "font-bold text-[var(--text-primary)]" : ""}>
                             {user.last_message.content}
                           </span>
+                        ) : isStrictlyOnline ? (
+                          <span className="text-emerald-600 dark:text-emerald-400 font-medium">Online • {user.role.replace(/_/g, " ")}</span>
+                        ) : effectiveStatus === "OFFLINE" ? (
+                          <span>Last seen {formatLastSeen(user.last_seen_at, user.last_seen_str)} • {user.role.replace(/_/g, " ")}</span>
                         ) : (
-                          user.role
+                          <span>{cfg.label} • {user.role.replace(/_/g, " ")}</span>
                         )}
                       </p>
 
@@ -1125,7 +1165,7 @@ export const LinkedInMessagingPage: React.FC<LinkedInMessagingPageProps> = ({
               <button
                 type="button"
                 onClick={() => setIsNotAvailableModalOpen(false)}
-                className="text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+                className="text-[var(--text-secondary)] hover:text-[var(--text-primary)] cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
