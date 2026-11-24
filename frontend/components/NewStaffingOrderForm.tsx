@@ -599,9 +599,12 @@ export const NewStaffingOrderForm: React.FC<NewStaffingOrderFormProps> = ({
         salary_range_eur_hr: resolvedSalaryText,
         start_date: targetStartDate || new Date().toISOString().split("T")[0],
         notes: comprehensiveNotes,
-        status: "IN_SOURCING",
+        status: created.status || (created.released_to_agency_at ? "RELEASED_TO_AGENCY" : "PENDING_INTERNAL_APPROVAL"),
+        current_approval_step: created.current_approval_step || 1,
+        total_approval_steps: created.total_approval_steps || 1,
+        approval_history: created.approval_history || [],
         candidates_count: 0,
-        created_at: new Date().toISOString()
+        created_at: created.created_at || new Date().toISOString()
       };
 
       onSubmitSuccess(formattedRequisition);

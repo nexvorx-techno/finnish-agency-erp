@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from app.core.database import get_db
 from app.models.talent import JobRequisition, CandidateShortlist, InterviewSlot, RelocationMilestone
-from app.models.client import ClientSite, ClientApprovalFlow
+from app.models.client import ClientSite, ClientApprovalFlow, ClientNotification
 
 router = APIRouter(prefix="/api/client", tags=["Client Talent Acquisition"])
 
@@ -181,6 +181,27 @@ def create_requisition(payload: RequisitionCreateSchema, db: Session = Depends(g
     db.add(new_req)
     db.commit()
     db.refresh(new_req)
+
+    # If internal approval is required, dispatch notification to designated Step 1 Approver
+    if levels and len(levels) > 0:
+        first_level = levels[0]
+        approver_id = first_level.get("approver_id")
+        approver_name = first_level.get("approver_name") or "Approver"
+        notif = ClientNotification(
+            client_id=payload.client_id,
+            user_id=approver_id,
+            title=f"Approval Required: {payload.role_title} ({req_code})",
+            message=f"Job Requisition {req_code} for {payload.vacancies_count}x {payload.role_title} submitted by {payload.created_by_name or 'Client User'} requires your Level 1 sign-off before release to Agency.",
+            notification_type="APPROVAL_ASSIGNMENT",
+            approval_type="Job Requisitions Approval",
+            approver_level=f"Level 1 (of {total_steps})",
+            next_level_approver=approver_name,
+            is_read=False,
+            created_at=datetime.utcnow()
+        )
+        db.add(notif)
+        db.commit()
+
     return {"message": "Requisition created successfully", "requisition": new_req}
 
 
@@ -215,10 +236,50 @@ def approve_requisition_step(
         if req.current_approval_step < req.total_approval_steps:
             req.current_approval_step += 1
             # Status stays PENDING_INTERNAL_APPROVAL
+            # Notify next level approver if configured
+            approval_flow = db.query(ClientApprovalFlow).filter(
+                ClientApprovalFlow.client_id == req.client_id,
+                ClientApprovalFlow.flow_key == "m1.2_req",
+                ClientApprovalFlow.is_active == True,
+            ).first()
+            if approval_flow and approval_flow.levels_json:
+                try:
+                    levels = json.loads(approval_flow.levels_json)
+                    if len(levels) >= req.current_approval_step:
+                        next_lvl = levels[req.current_approval_step - 1]
+                        notif = ClientNotification(
+                            client_id=req.client_id,
+                            user_id=next_lvl.get("approver_id"),
+                            title=f"Approval Required: {req.role_title} ({req.req_code})",
+                            message=f"Job Requisition {req.req_code} requires your Level {req.current_approval_step} authorization.",
+                            notification_type="APPROVAL_ASSIGNMENT",
+                            approval_type="Job Requisitions Approval",
+                            approver_level=f"Level {req.current_approval_step} (of {req.total_approval_steps})",
+                            next_level_approver=next_lvl.get("approver_name") or "Approver",
+                            is_read=False,
+                            created_at=datetime.utcnow()
+                        )
+                        db.add(notif)
+                except Exception:
+                    pass
         else:
             # All client internal approvals released! Requisition crosses to Agency Portal
             req.status = "RELEASED_TO_AGENCY"
             req.released_to_agency_at = datetime.utcnow()
+            # Notify requisition creator that requisition is now released to agency
+            notif = ClientNotification(
+                client_id=req.client_id,
+                user_id=req.created_by_user_id,
+                title=f"Requirement Released to Agency: {req.role_title} ({req.req_code})",
+                message=f"All internal approvals completed. Requisition {req.req_code} is now actively released to Agency Portal for candidate sourcing.",
+                notification_type="APPROVAL_ASSIGNMENT",
+                approval_type="Job Requisitions Approval",
+                approver_level="Approved & Released",
+                next_level_approver="Agency Talent Procurement",
+                is_read=False,
+                created_at=datetime.utcnow()
+            )
+            db.add(notif)
     elif decision == "REJECT":
         history.append({
             "step": req.current_approval_step,
@@ -230,6 +291,20 @@ def approve_requisition_step(
             "notes": payload.notes or "Rejected in internal review",
         })
         req.status = "REJECTED_INTERNAL"
+        # Notify requisition creator of rejection
+        notif = ClientNotification(
+            client_id=req.client_id,
+            user_id=req.created_by_user_id,
+            title=f"Requirement Rejected: {req.role_title} ({req.req_code})",
+            message=f"Job Requisition {req.req_code} was rejected during internal review by {payload.approver_name or 'Approver'}.",
+            notification_type="APPROVAL_ASSIGNMENT",
+            approval_type="Job Requisitions Approval",
+            approver_level="Rejected",
+            next_level_approver="None",
+            is_read=False,
+            created_at=datetime.utcnow()
+        )
+        db.add(notif)
     else:
         raise HTTPException(status_code=400, detail="Invalid decision. Allowed: APPROVE, REJECT")
 

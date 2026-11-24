@@ -436,8 +436,9 @@ export const TalentAcquisitionModule: React.FC<TalentAcquisitionModuleProps> = (
           companyName="Valmet Technologies Oy"
           defaultSiteId={selectedSite === "2" ? 2 : 1}
           onCancel={() => setIsOrderPageOpen(false)}
-          onSubmitSuccess={(createdReq) => {
+          onSubmitSuccess={async (createdReq) => {
             setRequisitions((prev) => [createdReq, ...prev]);
+            await fetchRequisitions();
             setIsOrderPageOpen(false);
           }}
         />
@@ -1183,10 +1184,14 @@ export const TalentAcquisitionModule: React.FC<TalentAcquisitionModuleProps> = (
                             e.stopPropagation();
                             handleOpenDetails(req);
                           }}
-                          className="px-3 py-1.5 rounded-xl bg-[var(--accent-color)] hover:bg-[var(--accent-hover)] text-white font-bold text-xs flex items-center gap-1.5 transition-all shadow-sm cursor-pointer"
+                          className={`px-3 py-1.5 rounded-xl text-white font-bold text-xs flex items-center gap-1.5 transition-all shadow-sm cursor-pointer ${
+                            req.status === "PENDING_INTERNAL_APPROVAL"
+                              ? "bg-amber-600 hover:bg-amber-700 ring-2 ring-amber-500/25"
+                              : "bg-[var(--accent-color)] hover:bg-[var(--accent-hover)]"
+                          }`}
                         >
                           <Eye className="w-3.5 h-3.5" />
-                          <span>View Details</span>
+                          <span>{req.status === "PENDING_INTERNAL_APPROVAL" ? "Review & Authorize" : "View Details"}</span>
                         </button>
                       </div>
                     </div>

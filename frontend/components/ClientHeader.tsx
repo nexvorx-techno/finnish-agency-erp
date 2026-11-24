@@ -45,6 +45,7 @@ interface ClientHeaderProps {
   onOpenPreferences: () => void;
   onOpenProfile?: () => void;
   onOpenMessaging?: () => void;
+  onNavigateToModule?: (moduleId: string) => void;
   unreadMessagesCount?: number;
   currentUser?: { fullName: string; role: string; avatarUrl?: string } | null;
   isLoading?: boolean;
@@ -66,6 +67,7 @@ export const ClientHeader: React.FC<ClientHeaderProps> = ({
   onOpenPreferences,
   onOpenProfile,
   onOpenMessaging,
+  onNavigateToModule,
   unreadMessagesCount = 0,
   currentUser,
   clientId = 1,
@@ -114,8 +116,8 @@ export const ClientHeader: React.FC<ClientHeaderProps> = ({
     };
   }, [fetchNotifications]);
 
-  const handleMarkAsRead = async (notifId: number, e: React.MouseEvent) => {
-    e.stopPropagation();
+  const handleMarkAsRead = async (notifId: number, e?: React.MouseEvent) => {
+    e?.stopPropagation();
     try {
       await fetch(`${API_BASE}/api/client/${clientId}/notifications/${notifId}/read`, {
         method: "POST",
@@ -441,80 +443,111 @@ export const ClientHeader: React.FC<ClientHeaderProps> = ({
                       </p>
                     </div>
                   ) : (
-                    notifications.map((n) => (
-                      <div
-                        key={n.id}
-                        className={`p-3.5 transition-colors flex gap-3 ${
-                          n.is_read ? "bg-[var(--bg-card)] opacity-85" : "bg-[var(--accent-light)]/40 hover:bg-[var(--accent-light)]/60"
-                        }`}
-                      >
-                        <div className="mt-0.5 shrink-0">
-                          {n.notification_type === "APPROVAL_ASSIGNMENT" || n.notification_type === "APPROVAL_FLOW" ? (
-                            <div className="w-7 h-7 rounded-xl bg-blue-500/10 text-[var(--accent-color)] flex items-center justify-center">
-                              <Workflow className="w-3.5 h-3.5" />
-                            </div>
-                          ) : (
-                            <div className="w-7 h-7 rounded-xl bg-emerald-500/10 text-emerald-600 flex items-center justify-center">
-                              <ShieldCheck className="w-3.5 h-3.5" />
-                            </div>
-                          )}
-                        </div>
+                    notifications.map((n) => {
+                      const isReqApproval =
+                        n.approval_type?.toLowerCase().includes("requisition") ||
+                        n.title?.toLowerCase().includes("req-") ||
+                        n.message?.toLowerCase().includes("requisition");
+                      const isInvoiceApproval =
+                        n.approval_type?.toLowerCase().includes("invoice") ||
+                        n.title?.toLowerCase().includes("inv-");
 
-                        <div className="flex-1 min-w-0 space-y-1.5">
-                          <div className="flex items-center justify-between gap-2">
-                            <h5 className="text-xs font-bold text-[var(--text-primary)] truncate">
-                              {n.title}
-                            </h5>
-                            <span className="text-[9px] text-[var(--text-secondary)] whitespace-nowrap">
-                              {formatTimeAgo(n.created_at)}
-                            </span>
+                      const handleCardClick = () => {
+                        if (!n.is_read) {
+                          handleMarkAsRead(n.id);
+                        }
+                        setIsNotifOpen(false);
+                        if (isReqApproval && onNavigateToModule) {
+                          onNavigateToModule("m1.2_req");
+                        } else if (isInvoiceApproval && onNavigateToModule) {
+                          onNavigateToModule("m1.6_invoices");
+                        }
+                      };
+
+                      return (
+                        <div
+                          key={n.id}
+                          onClick={handleCardClick}
+                          className={`p-3.5 transition-colors flex gap-3 cursor-pointer ${
+                            n.is_read ? "bg-[var(--bg-card)] opacity-85 hover:bg-[var(--bg-secondary)]/50" : "bg-[var(--accent-light)]/40 hover:bg-[var(--accent-light)]/70 border-l-4 border-l-[var(--accent-color)]"
+                          }`}
+                        >
+                          <div className="mt-0.5 shrink-0">
+                            {n.notification_type === "APPROVAL_ASSIGNMENT" || n.notification_type === "APPROVAL_FLOW" ? (
+                              <div className="w-7 h-7 rounded-xl bg-blue-500/10 text-[var(--accent-color)] flex items-center justify-center">
+                                <Workflow className="w-3.5 h-3.5" />
+                              </div>
+                            ) : (
+                              <div className="w-7 h-7 rounded-xl bg-emerald-500/10 text-emerald-600 flex items-center justify-center">
+                                <ShieldCheck className="w-3.5 h-3.5" />
+                              </div>
+                            )}
                           </div>
 
-                          <p className="text-[11px] text-[var(--text-secondary)] leading-snug">
-                            {n.message}
-                          </p>
-
-                          {/* Specific Approval Flow Details Requested by User */}
-                          {(n.approval_type || n.approver_level || n.next_level_approver) && (
-                            <div className="mt-1.5 p-2 rounded-xl bg-[var(--bg-card)] border border-[var(--border-color)] space-y-1 text-[10px]">
-                              <div className="flex items-center justify-between gap-1">
-                                <span className="text-[var(--text-secondary)] font-medium">Approval Type:</span>
-                                <span className="font-bold text-[var(--accent-color)]">
-                                  {n.approval_type || "Standard"}
-                                </span>
-                              </div>
-
-                              <div className="flex items-center justify-between gap-1">
-                                <span className="text-[var(--text-secondary)] font-medium">Approver Level:</span>
-                                <span className="font-bold text-emerald-600 dark:text-emerald-400">
-                                  {n.approver_level || "Assigned Level"}
-                                </span>
-                              </div>
-
-                              <div className="flex items-center justify-between gap-1 pt-0.5 border-t border-[var(--border-color)]/60">
-                                <span className="text-[var(--text-secondary)] font-medium">Next Escalation:</span>
-                                <span className="font-semibold text-[var(--text-primary)] truncate max-w-[150px]">
-                                  {n.next_level_approver || "None (Final Sign-Off Authorization)"}
-                                </span>
-                              </div>
+                          <div className="flex-1 min-w-0 space-y-1.5">
+                            <div className="flex items-center justify-between gap-2">
+                              <h5 className="text-xs font-bold text-[var(--text-primary)] truncate">
+                                {n.title}
+                              </h5>
+                              <span className="text-[9px] text-[var(--text-secondary)] whitespace-nowrap">
+                                {formatTimeAgo(n.created_at)}
+                              </span>
                             </div>
-                          )}
 
-                          {!n.is_read && (
-                            <div className="pt-1 flex justify-end">
-                              <button
-                                type="button"
-                                onClick={(e) => handleMarkAsRead(n.id, e)}
-                                className="text-[10px] font-semibold text-[var(--accent-color)] hover:underline flex items-center gap-0.5 cursor-pointer"
-                              >
-                                <Check className="w-3 h-3" />
-                                <span>Mark read</span>
-                              </button>
+                            <p className="text-[11px] text-[var(--text-secondary)] leading-snug">
+                              {n.message}
+                            </p>
+
+                            {/* Specific Approval Flow Details */}
+                            {(n.approval_type || n.approver_level || n.next_level_approver) && (
+                              <div className="mt-1.5 p-2 rounded-xl bg-[var(--bg-card)] border border-[var(--border-color)] space-y-1 text-[10px]">
+                                <div className="flex items-center justify-between gap-1">
+                                  <span className="text-[var(--text-secondary)] font-medium">Approval Type:</span>
+                                  <span className="font-bold text-[var(--accent-color)]">
+                                    {n.approval_type || "Standard"}
+                                  </span>
+                                </div>
+
+                                <div className="flex items-center justify-between gap-1">
+                                  <span className="text-[var(--text-secondary)] font-medium">Approver Level:</span>
+                                  <span className="font-bold text-amber-600 dark:text-amber-400">
+                                    {n.approver_level || "Assigned Level"}
+                                  </span>
+                                </div>
+
+                                <div className="flex items-center justify-between gap-1 pt-0.5 border-t border-[var(--border-color)]/60">
+                                  <span className="text-[var(--text-secondary)] font-medium">Next Escalation:</span>
+                                  <span className="font-semibold text-[var(--text-primary)] truncate max-w-[150px]">
+                                    {n.next_level_approver || "None (Final Sign-Off Authorization)"}
+                                  </span>
+                                </div>
+                              </div>
+                            )}
+
+                            <div className="pt-1 flex items-center justify-between gap-2">
+                              {isReqApproval && (
+                                <span className="text-[10px] font-bold text-[var(--accent-color)] hover:underline flex items-center gap-0.5">
+                                  Review Requisition →
+                                </span>
+                              )}
+                              {!n.is_read && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleMarkAsRead(n.id, e);
+                                  }}
+                                  className="text-[10px] font-semibold text-[var(--text-secondary)] hover:text-[var(--accent-color)] flex items-center gap-0.5 cursor-pointer ml-auto"
+                                >
+                                  <Check className="w-3 h-3" />
+                                  <span>Mark read</span>
+                                </button>
+                              )}
                             </div>
-                          )}
+                          </div>
                         </div>
-                      </div>
-                    ))
+                      );
+                    })
                   )}
                 </div>
 

@@ -762,6 +762,7 @@ export default function ClientPortalPage() {
           onOpenPreferences={() => setIsPreferencesOpen(true)}
           onOpenProfile={() => setIsProfileOpen(true)}
           onOpenMessaging={() => navigateToModule("messaging")}
+          onNavigateToModule={navigateToModule}
           unreadMessagesCount={unreadChatCount}
           currentUser={currentUser}
           isLoading={isSyncing}
