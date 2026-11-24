@@ -10,6 +10,7 @@ from app.api.client_routes import router as client_router
 from app.api.talent_routes import router as talent_router
 from app.api.roster_routes import router as roster_router
 from app.api.chat_routes import router as chat_router
+from app.api.invoice_routes import router as invoice_router
 
 # Create database tables
 Base.metadata.create_all(bind=engine)
@@ -32,6 +33,7 @@ app.include_router(client_router)
 app.include_router(talent_router)
 app.include_router(roster_router)
 app.include_router(chat_router)
+app.include_router(invoice_router)
 
 @app.get("/health")
 def health_check():

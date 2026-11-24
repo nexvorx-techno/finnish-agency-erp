@@ -20,7 +20,13 @@ class JobRequisition(Base):
     salary_range_eur_hr = Column(String(100), default="18.50 - 22.00 €/h")
     start_date = Column(Date, nullable=False)
     notes = Column(Text, nullable=True)
-    status = Column(String(50), default="IN_SOURCING")  # IN_SOURCING, INTERVIEWING, OFFER_ACCEPTED, FULFILLED, CANCELLED
+    status = Column(String(50), default="IN_SOURCING")  # PENDING_INTERNAL_APPROVAL, RELEASED_TO_AGENCY, IN_SOURCING, INTERVIEWING, OFFER_ACCEPTED, FULFILLED, REJECTED_INTERNAL
+    current_approval_step = Column(Integer, default=1)
+    total_approval_steps = Column(Integer, default=1)
+    approval_history = Column(Text, nullable=True)  # JSON audit trail of who approved/rejected
+    released_to_agency_at = Column(DateTime, nullable=True)
+    created_by_user_id = Column(Integer, nullable=True)
+    created_by_name = Column(String(255), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     # Relationships

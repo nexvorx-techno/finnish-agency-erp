@@ -4,7 +4,8 @@ from app.models.client import (
     ClientUser,
     WorkerDeployment,
     BiometricLog,
-    TimesheetShiftRecord
+    TimesheetShiftRecord,
+    ClientInvoice
 )
 from app.models.chat import InternalChatMessage
 
@@ -15,5 +16,6 @@ __all__ = [
     "WorkerDeployment",
     "BiometricLog",
     "TimesheetShiftRecord",
+    "ClientInvoice",
     "InternalChatMessage"
 ]

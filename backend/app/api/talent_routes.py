@@ -1,3 +1,4 @@
+import json
 from datetime import datetime, date
 from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -5,7 +6,7 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from app.core.database import get_db
 from app.models.talent import JobRequisition, CandidateShortlist, InterviewSlot, RelocationMilestone
-from app.models.client import ClientSite
+from app.models.client import ClientSite, ClientApprovalFlow
 
 router = APIRouter(prefix="/api/client", tags=["Client Talent Acquisition"])
 
@@ -21,6 +22,15 @@ class RequisitionCreateSchema(BaseModel):
     shift_pattern: str = "2-vuorotyö (Day/Evening)"
     salary_range_eur_hr: str = "18.50 - 22.00 €/h"
     start_date: str  # YYYY-MM-DD
+    notes: Optional[str] = None
+    created_by_user_id: Optional[int] = None
+    created_by_name: Optional[str] = "Client User"
+
+class RequisitionApprovalDecisionSchema(BaseModel):
+    decision: str  # "APPROVE" or "REJECT"
+    approver_user_id: Optional[int] = None
+    approver_name: Optional[str] = "Site Manager"
+    approver_role: Optional[str] = "SITE_MANAGER"
     notes: Optional[str] = None
 
 class InterviewScheduleSchema(BaseModel):
@@ -54,6 +64,12 @@ def list_requisitions(
     for r in reqs:
         site = db.query(ClientSite).filter(ClientSite.id == r.site_id).first()
         candidates_count = db.query(CandidateShortlist).filter(CandidateShortlist.requisition_id == r.id).count()
+
+        try:
+            history = json.loads(r.approval_history) if r.approval_history else []
+        except Exception:
+            history = []
+
         results.append({
             "id": r.id,
             "req_code": r.req_code,
@@ -72,6 +88,11 @@ def list_requisitions(
             "start_date": r.start_date.isoformat() if r.start_date else None,
             "notes": r.notes,
             "status": r.status,
+            "current_approval_step": getattr(r, "current_approval_step", 1) or 1,
+            "total_approval_steps": getattr(r, "total_approval_steps", 1) or 1,
+            "approval_history": history,
+            "released_to_agency_at": r.released_to_agency_at.isoformat() if getattr(r, "released_to_agency_at", None) else None,
+            "created_by_name": getattr(r, "created_by_name", "Client User") or "Client User",
             "candidates_count": candidates_count,
             "created_at": r.created_at.isoformat() if r.created_at else None
         })
@@ -89,6 +110,51 @@ def create_requisition(payload: RequisitionCreateSchema, db: Session = Depends(g
     except Exception:
         parsed_start_date = date.today()
 
+    # Check if ClientApprovalFlow is configured for "m1.2_req"
+    approval_flow = db.query(ClientApprovalFlow).filter(
+        ClientApprovalFlow.client_id == payload.client_id,
+        ClientApprovalFlow.flow_key == "m1.2_req",
+        ClientApprovalFlow.is_active == True,
+    ).first()
+
+    levels = []
+    if approval_flow and approval_flow.levels_json:
+        try:
+            levels = json.loads(approval_flow.levels_json)
+        except Exception:
+            levels = []
+
+    now_iso = datetime.utcnow().isoformat()
+    if levels and len(levels) > 0:
+        initial_status = "PENDING_INTERNAL_APPROVAL"
+        total_steps = len(levels)
+        history = [
+            {
+                "step": 0,
+                "action": "CREATED",
+                "approver_name": payload.created_by_name or "Client User",
+                "role": "INITIATOR",
+                "timestamp": now_iso,
+                "notes": "Worker requirement submitted for internal approvals",
+            }
+        ]
+        released_at = None
+    else:
+        # If no internal approval steps configured, release directly to agency
+        initial_status = "RELEASED_TO_AGENCY"
+        total_steps = 1
+        history = [
+            {
+                "step": 1,
+                "action": "AUTO_RELEASED",
+                "approver_name": payload.created_by_name or "Client Admin",
+                "role": "CLIENT_ADMIN",
+                "timestamp": now_iso,
+                "notes": "Requirement auto-released to Agency Portal",
+            }
+        ]
+        released_at = datetime.utcnow()
+
     new_req = JobRequisition(
         req_code=req_code,
         client_id=payload.client_id,
@@ -103,13 +169,79 @@ def create_requisition(payload: RequisitionCreateSchema, db: Session = Depends(g
         salary_range_eur_hr=payload.salary_range_eur_hr,
         start_date=parsed_start_date,
         notes=payload.notes,
-        status="IN_SOURCING",
+        status=initial_status,
+        current_approval_step=1,
+        total_approval_steps=total_steps,
+        approval_history=json.dumps(history),
+        released_to_agency_at=released_at,
+        created_by_user_id=payload.created_by_user_id,
+        created_by_name=payload.created_by_name or "Client User",
         created_at=datetime.utcnow()
     )
     db.add(new_req)
     db.commit()
     db.refresh(new_req)
     return {"message": "Requisition created successfully", "requisition": new_req}
+
+
+@router.post("/requisitions/{req_id}/approval-decision")
+def approve_requisition_step(
+    req_id: int,
+    payload: RequisitionApprovalDecisionSchema,
+    db: Session = Depends(get_db)
+):
+    req = db.query(JobRequisition).filter(JobRequisition.id == req_id).first()
+    if not req:
+        raise HTTPException(status_code=404, detail="Requisition not found")
+
+    try:
+        history = json.loads(req.approval_history) if req.approval_history else []
+    except Exception:
+        history = []
+
+    decision = payload.decision.strip().upper()
+    now_iso = datetime.utcnow().isoformat()
+
+    if decision == "APPROVE":
+        history.append({
+            "step": req.current_approval_step,
+            "action": "APPROVED",
+            "approver_id": payload.approver_user_id,
+            "approver_name": payload.approver_name or "Approver",
+            "role": payload.approver_role or "SITE_MANAGER",
+            "timestamp": now_iso,
+            "notes": payload.notes or "Approved",
+        })
+        if req.current_approval_step < req.total_approval_steps:
+            req.current_approval_step += 1
+            # Status stays PENDING_INTERNAL_APPROVAL
+        else:
+            # All client internal approvals released! Requisition crosses to Agency Portal
+            req.status = "RELEASED_TO_AGENCY"
+            req.released_to_agency_at = datetime.utcnow()
+    elif decision == "REJECT":
+        history.append({
+            "step": req.current_approval_step,
+            "action": "REJECTED",
+            "approver_id": payload.approver_user_id,
+            "approver_name": payload.approver_name or "Approver",
+            "role": payload.approver_role or "SITE_MANAGER",
+            "timestamp": now_iso,
+            "notes": payload.notes or "Rejected in internal review",
+        })
+        req.status = "REJECTED_INTERNAL"
+    else:
+        raise HTTPException(status_code=400, detail="Invalid decision. Allowed: APPROVE, REJECT")
+
+    req.approval_history = json.dumps(history)
+    db.commit()
+    db.refresh(req)
+    return {
+        "message": f"Requisition {decision} recorded",
+        "status": req.status,
+        "current_approval_step": req.current_approval_step,
+        "total_approval_steps": req.total_approval_steps
+    }
 
 
 @router.get("/requisitions/{req_id}/candidates")

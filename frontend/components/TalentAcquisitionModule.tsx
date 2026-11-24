@@ -46,6 +46,18 @@ export interface RequisitionItem {
   start_date: string;
   notes?: string;
   status: string;
+  current_approval_step?: number;
+  total_approval_steps?: number;
+  approval_history?: Array<{
+    step: number;
+    action: string;
+    approver_name?: string;
+    role?: string;
+    timestamp: string;
+    notes?: string;
+  }>;
+  released_to_agency_at?: string | null;
+  created_by_name?: string;
   candidates_count: number;
   created_at: string;
 }
@@ -144,6 +156,47 @@ export const TalentAcquisitionModule: React.FC<TalentAcquisitionModuleProps> = (
     if (n.includes("german") || n.includes("germany")) return "🇩🇪";
     if (n.includes("spanish") || n.includes("spain")) return "🇪🇸";
     return "🌐";
+  };
+
+  const getReqBadge = (status: string, currentStep?: number, totalSteps?: number) => {
+    switch (status) {
+      case "PENDING_INTERNAL_APPROVAL":
+        return {
+          label: `Pending Approval (${currentStep || 1}/${totalSteps || 1})`,
+          classes: "bg-amber-500/10 text-amber-600 border border-amber-500/20 font-bold",
+        };
+      case "RELEASED_TO_AGENCY":
+        return {
+          label: "Released to Agency",
+          classes: "bg-emerald-500/10 text-emerald-600 border border-emerald-500/20 font-bold",
+        };
+      case "IN_SOURCING":
+      case "AGENCY_PROCURING":
+        return {
+          label: "Agency Procuring",
+          classes: "bg-blue-500/10 text-blue-600 border border-blue-500/20 font-bold",
+        };
+      case "INTERVIEWING":
+        return {
+          label: "Interviews Active",
+          classes: "bg-purple-500/10 text-purple-600 border border-purple-500/20 font-bold",
+        };
+      case "FULFILLED":
+        return {
+          label: "Fulfilled",
+          classes: "bg-emerald-500/15 text-emerald-700 border border-emerald-500/30 font-bold",
+        };
+      case "REJECTED_INTERNAL":
+        return {
+          label: "Rejected Internally",
+          classes: "bg-rose-500/10 text-rose-600 border border-rose-500/20 font-bold",
+        };
+      default:
+        return {
+          label: status,
+          classes: "bg-slate-100 text-slate-600 border border-slate-200",
+        };
+    }
   };
 
   const calculateBillingEstimate = (salaryRange: string) => {
@@ -349,6 +402,31 @@ export const TalentAcquisitionModule: React.FC<TalentAcquisitionModuleProps> = (
     }
   };
 
+  // Handle Requisition Approval Decision
+  const [isApprovingReq, setIsApprovingReq] = useState(false);
+  const handleRequisitionDecision = async (reqId: number, decision: "APPROVE" | "REJECT") => {
+    setIsApprovingReq(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/client/requisitions/${reqId}/approval-decision`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          decision,
+          approver_name: userName || "Site Manager",
+          approver_role: "SITE_MANAGER",
+          notes: decision === "APPROVE" ? "Approved for agency procurement release." : "Requirement rejected in internal review.",
+        }),
+      });
+      if (res.ok) {
+        await fetchRequisitions();
+      }
+    } catch (err) {
+      console.error("Requisition approval failed:", err);
+    } finally {
+      setIsApprovingReq(false);
+    }
+  };
+
   // Render dedicated full-page New Staffing Order Form if active
   if (isOrderPageOpen) {
     return (
@@ -488,17 +566,18 @@ export const TalentAcquisitionModule: React.FC<TalentAcquisitionModuleProps> = (
                     <span className="text-xs font-mono font-bold px-2 py-0.5 rounded bg-[var(--bg-secondary)] text-[var(--accent-color)] border border-[var(--border-color)]">
                       {viewingRequisition.req_code}
                     </span>
-                    <span
-                      className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wider ${
-                        viewingRequisition.status === "FULFILLED"
-                          ? "bg-emerald-500/10 text-emerald-600 border border-emerald-500/20"
-                          : viewingRequisition.status === "INTERVIEWING"
-                          ? "bg-blue-500/10 text-blue-600 border border-blue-500/20"
-                          : "bg-amber-500/10 text-amber-600 border border-amber-500/20"
-                      }`}
-                    >
-                      {viewingRequisition.status}
-                    </span>
+                    {(() => {
+                      const badge = getReqBadge(
+                        viewingRequisition.status,
+                        viewingRequisition.current_approval_step,
+                        viewingRequisition.total_approval_steps
+                      );
+                      return (
+                        <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wider ${badge.classes}`}>
+                          {badge.label}
+                        </span>
+                      );
+                    })()}
                   </div>
                   <h2 className="text-lg font-black text-[var(--text-primary)] mt-0.5">
                     {viewingRequisition.role_title}
@@ -525,6 +604,54 @@ export const TalentAcquisitionModule: React.FC<TalentAcquisitionModuleProps> = (
                 ))}
               </div>
             </div>
+
+            {/* Enterprise Requisition Internal Approval Gate Banner */}
+            {viewingRequisition.status === "PENDING_INTERNAL_APPROVAL" && (
+              <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-in fade-in">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 rounded-xl bg-amber-500 text-white flex items-center justify-center font-bold text-xs shrink-0 shadow-xs">
+                    {viewingRequisition.current_approval_step || 1}/{viewingRequisition.total_approval_steps || 1}
+                  </div>
+                  <div>
+                    <div className="text-xs font-bold text-[var(--text-primary)]">
+                      Client Internal Verification (Step {viewingRequisition.current_approval_step || 1} of {viewingRequisition.total_approval_steps || 1})
+                    </div>
+                    <p className="text-[11px] text-[var(--text-secondary)] mt-0.5">
+                      This worker requirement must complete internal sign-off before being released to the Agency Portal for procurement.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    type="button"
+                    disabled={isApprovingReq}
+                    onClick={() => handleRequisitionDecision(viewingRequisition.id, "APPROVE")}
+                    className="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-xs flex items-center gap-1.5 cursor-pointer disabled:opacity-60 transition-all"
+                  >
+                    <Check className="w-3.5 h-3.5" />
+                    <span>Approve & Release</span>
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isApprovingReq}
+                    onClick={() => handleRequisitionDecision(viewingRequisition.id, "REJECT")}
+                    className="px-3 py-1.5 rounded-xl border border-rose-500/30 text-rose-600 hover:bg-rose-500/10 text-xs font-semibold cursor-pointer disabled:opacity-60 transition-all"
+                  >
+                    Reject
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {viewingRequisition.status === "RELEASED_TO_AGENCY" && (
+              <div className="p-3.5 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex items-center gap-2.5 text-xs text-emerald-700 dark:text-emerald-400 font-semibold">
+                <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600" />
+                <span>
+                  All client internal approvals verified. Released to Agency Portal for candidate matching and procurement.
+                </span>
+              </div>
+            )}
 
             {/* Main 2-Column Responsive Layout */}
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
@@ -1005,17 +1132,14 @@ export const TalentAcquisitionModule: React.FC<TalentAcquisitionModuleProps> = (
                         <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-[var(--bg-secondary)] text-[var(--text-secondary)] font-bold">
                           {req.req_code}
                         </span>
-                        <span
-                          className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider ${
-                            req.status === "FULFILLED"
-                              ? "bg-emerald-500/10 text-emerald-600"
-                              : req.status === "INTERVIEWING"
-                              ? "bg-blue-500/10 text-blue-600"
-                              : "bg-amber-500/10 text-amber-600"
-                          }`}
-                        >
-                          {req.status}
-                        </span>
+                        {(() => {
+                          const badge = getReqBadge(req.status, req.current_approval_step, req.total_approval_steps);
+                          return (
+                            <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider ${badge.classes}`}>
+                              {badge.label}
+                            </span>
+                          );
+                        })()}
                       </div>
 
                       <h3 className="text-sm font-bold text-[var(--text-primary)] mt-3 line-clamp-1">

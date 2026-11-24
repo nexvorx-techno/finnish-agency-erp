@@ -569,7 +569,7 @@ export const NewStaffingOrderForm: React.FC<NewStaffingOrderFormProps> = ({
         notes: comprehensiveNotes
       };
 
-      const res = await fetch(`${API_BASE}/api/talent/requisitions/create`, {
+      const res = await fetch(`${API_BASE}/api/client/requisitions/create`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)

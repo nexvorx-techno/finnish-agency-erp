@@ -178,3 +178,41 @@ class ClientNotification(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
+class ClientInvoice(Base):
+    __tablename__ = "client_invoices"
+
+    id = Column(Integer, primary_key=True, index=True)
+    invoice_number = Column(String(50), unique=True, index=True, nullable=False)
+    client_id = Column(Integer, ForeignKey("client_companies.id"), nullable=False, index=True)
+    site_id = Column(Integer, ForeignKey("client_sites.id"), nullable=True)
+    billing_period_start = Column(Date, nullable=False)
+    billing_period_end = Column(Date, nullable=False)
+    issue_date = Column(Date, nullable=False)
+    due_date = Column(Date, nullable=False)
+    total_regular_hours = Column(Float, default=0.0)
+    total_overtime_hours = Column(Float, default=0.0)
+    subtotal_eur = Column(Float, nullable=False)
+    alv_percentage = Column(Float, default=25.5)  # Finnish ALV standard rate 25.5%
+    alv_amount_eur = Column(Float, nullable=False)
+    total_amount_eur = Column(Float, nullable=False)
+    currency = Column(String(10), default="EUR")
+    agency_approval_status = Column(String(50), default="APPROVED")
+    client_status = Column(String(50), default="PENDING_INTERNAL_APPROVAL", index=True)  # PENDING_INTERNAL_APPROVAL, RELEASED_TO_ACCOUNTS, PAID_SUBMITTED, SETTLED, DISPUTED
+    current_approval_step = Column(Integer, default=1)
+    total_approval_steps = Column(Integer, default=1)
+    approval_history = Column(Text, nullable=True)
+    items_breakdown_json = Column(Text, nullable=True)
+    notes = Column(Text, nullable=True)
+    payment_date = Column(Date, nullable=True)
+    bank_name = Column(String(100), nullable=True)
+    reference_number = Column(String(50), nullable=True)  # Finnish Viitenumero
+    paid_amount_eur = Column(Float, nullable=True)
+    payment_receipt_url = Column(String(255), nullable=True)
+    payment_confirmed_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    company = relationship("ClientCompany")
+    site = relationship("ClientSite")
+
+
+
