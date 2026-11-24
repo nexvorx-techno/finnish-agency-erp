@@ -66,14 +66,8 @@ function formatLastSeen(isoStr?: string | null, fallbackStr?: string): string {
   try {
     const date = new Date(isoStr);
     if (isNaN(date.getTime())) return fallbackStr || "recently";
+
     const now = new Date();
-    const diffMs = Math.max(0, now.getTime() - date.getTime());
-    const diffSec = Math.floor(diffMs / 1000);
-    const diffMin = Math.floor(diffSec / 60);
-
-    if (diffSec < 45) return "just now";
-    if (diffMin < 60) return `${diffMin}m ago`;
-
     const isToday =
       date.getDate() === now.getDate() &&
       date.getMonth() === now.getMonth() &&
@@ -86,10 +80,11 @@ function formatLastSeen(isoStr?: string | null, fallbackStr?: string): string {
       date.getMonth() === yesterday.getMonth() &&
       date.getFullYear() === yesterday.getFullYear();
 
+    // WhatsApp format using device local time (e.g. 8:25 PM)
     const timeStr = date.toLocaleTimeString([], {
-      hour: "2-digit",
+      hour: "numeric",
       minute: "2-digit",
-      hour12: false,
+      hour12: true,
     });
 
     if (isToday) return `today at ${timeStr}`;
@@ -99,7 +94,7 @@ function formatLastSeen(isoStr?: string | null, fallbackStr?: string): string {
       day: "numeric",
       month: "short",
     });
-    return `${dateStr}, ${timeStr}`;
+    return `${dateStr} at ${timeStr}`;
   } catch {
     return fallbackStr || "recently";
   }
@@ -251,6 +246,7 @@ export const RightRail: React.FC<RightRailProps> = ({
   const [chatInput, setChatInput] = useState("");
   const [isPeerTyping, setIsPeerTyping] = useState(false);
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastTypingSentRef = useRef<number>(0);
   const prevUnreadMapRef = useRef<Record<number, number>>({});
   const isFirstLoadRef = useRef(true);
   const lastMsgIdRef = useRef<number>(0);
@@ -351,10 +347,16 @@ export const RightRail: React.FC<RightRailProps> = ({
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setChatInput(e.target.value);
-    notifyTyping(true);
+    const now = Date.now();
+    // Throttle typing notification to server: send at most once every 3.5 seconds
+    if (now - lastTypingSentRef.current > 3500) {
+      lastTypingSentRef.current = now;
+      notifyTyping(true);
+    }
     if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
     typingTimeoutRef.current = setTimeout(() => {
       notifyTyping(false);
+      lastTypingSentRef.current = 0;
     }, 2500);
   };
 
@@ -484,20 +486,42 @@ export const RightRail: React.FC<RightRailProps> = ({
   }, [clientId, currentUser, floatingChat.isOpen, floatingChat.peer, playNotificationSound]);
 
   // Real-time polling:
-  // 1. Poll users presence & unread badges every 8s
+  // 1. Poll users presence & unread badges every 7s when document is visible
   useEffect(() => {
     fetchUsers();
-    const userInterval = setInterval(fetchUsers, 8000);
+    const userInterval = setInterval(() => {
+      if (typeof document !== "undefined" && document.visibilityState === "visible") {
+        fetchUsers();
+      }
+    }, 7000);
     return () => clearInterval(userInterval);
   }, [fetchUsers]);
 
-  // 2. Poll active conversation every 1.5s ONLY when floating chat is open and active
+  // 2. Poll active conversation every 2.5s ONLY when floating chat is open, active, and document visible
   useEffect(() => {
     if (!floatingChat.isOpen || floatingChat.isMinimized) return;
     fetchFloatingMessages();
-    const msgInterval = setInterval(fetchFloatingMessages, 1500);
+    const msgInterval = setInterval(() => {
+      if (typeof document !== "undefined" && document.visibilityState === "visible") {
+        fetchFloatingMessages();
+      }
+    }, 2500);
     return () => clearInterval(msgInterval);
   }, [floatingChat.isOpen, floatingChat.isMinimized, fetchFloatingMessages]);
+
+  // 3. Immediately refresh when switching back to tab
+  useEffect(() => {
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible") {
+        fetchUsers();
+        if (floatingChat.isOpen && !floatingChat.isMinimized) {
+          fetchFloatingMessages();
+        }
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => document.removeEventListener("visibilitychange", handleVisibility);
+  }, [fetchUsers, fetchFloatingMessages, floatingChat.isOpen, floatingChat.isMinimized]);
 
   // Auto-scroll chat box to bottom
   useEffect(() => {
@@ -591,6 +615,7 @@ export const RightRail: React.FC<RightRailProps> = ({
     if (!text || !currentUser || !floatingChat.peer) return;
 
     if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+    lastTypingSentRef.current = 0;
     notifyTyping(false);
 
     // 1. Instantly clear input so user can continue typing next message with 0ms delay

@@ -148,7 +148,7 @@ def get_internal_chat_users(
                 ),
             )
             .order_by(InternalChatMessage.id.desc())
-            .limit(100)
+            .limit(25)
             .all()
         )
         for m in recent_msgs:
@@ -222,23 +222,12 @@ def get_internal_chat_users(
             }
         )
 
-    # General channel count
-    general_count = (
-        db.query(InternalChatMessage)
-        .filter(
-            InternalChatMessage.client_id == client_id,
-            InternalChatMessage.portal_type == "CLIENT",
-            InternalChatMessage.channel_type == "GENERAL",
-        )
-        .count()
-    )
-
     return {
         "client_id": client_id,
         "portal": "CLIENT",
         "users": result,
         "disappearing_ttl": active_ttl,
-        "general_total_messages": general_count,
+        "general_total_messages": 0,
     }
 
 
@@ -360,31 +349,21 @@ def get_internal_chat_messages(
         if peer_typing_time and (datetime.utcnow() - peer_typing_time).total_seconds() < 4.0:
             is_peer_typing = True
 
-        # Only perform DB write & commit if unread messages actually exist from peer
-        has_unread = (
-            db.query(InternalChatMessage.id)
-            .filter(
-                InternalChatMessage.client_id == client_id,
-                InternalChatMessage.portal_type == "CLIENT",
-                InternalChatMessage.channel_type == "DIRECT",
-                InternalChatMessage.sender_id == peer_id,
-                InternalChatMessage.recipient_id == user_id,
-                or_(InternalChatMessage.is_read == False, InternalChatMessage.is_delivered == False),
-            )
-            .first()
-        )
-        if has_unread:
-            db.query(InternalChatMessage).filter(
-                InternalChatMessage.client_id == client_id,
-                InternalChatMessage.portal_type == "CLIENT",
-                InternalChatMessage.channel_type == "DIRECT",
-                InternalChatMessage.sender_id == peer_id,
-                InternalChatMessage.recipient_id == user_id,
-                or_(InternalChatMessage.is_read == False, InternalChatMessage.is_delivered == False),
-            ).update({"is_read": True, "is_delivered": True}, synchronize_session=False)
-            db.commit()
-
     messages = query.order_by(InternalChatMessage.id.asc()).limit(limit).all()
+
+    # Mark unread messages delivered & read in a single quick update
+    if channel_type == "DIRECT" and user_id and peer_id:
+        unread_ids = [m.id for m in messages if m.recipient_id == user_id and (not m.is_read or not m.is_delivered)]
+        if unread_ids:
+            db.query(InternalChatMessage).filter(InternalChatMessage.id.in_(unread_ids)).update(
+                {"is_read": True, "is_delivered": True}, synchronize_session=False
+            )
+            db.commit()
+            for m in messages:
+                if m.id in unread_ids:
+                    m.is_read = True
+                    m.is_delivered = True
+
     return {
         "client_id": client_id,
         "portal": "CLIENT",
