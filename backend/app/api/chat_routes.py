@@ -163,6 +163,7 @@ def get_internal_chat_users(
                 last_msg_map[peer_key] = {
                     "content": m.content[:35],
                     "time_str": m.created_at.strftime("%H:%M") if m.created_at else "",
+                    "created_at": m.created_at.isoformat() if m.created_at else None,
                 }
 
     # Query fresh user records after heartbeat update

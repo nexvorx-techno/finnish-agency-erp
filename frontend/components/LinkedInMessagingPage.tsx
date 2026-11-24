@@ -56,6 +56,7 @@ export interface ChatUser {
   last_message?: {
     content: string;
     time_str: string;
+    created_at?: string | null;
   } | null;
 }
 
@@ -148,7 +149,49 @@ const AVAILABILITY_CONFIG: Record<
   },
 };
 
-// Formats status next to colleague name (e.g. Rishikesh - Online, Mahesh - Not available till 30-11-2026)
+// WhatsApp / Device local time presence formatting
+function formatLastSeen(isoStr?: string | null, fallbackStr?: string): string {
+  if (!isoStr) {
+    if (fallbackStr && fallbackStr.trim()) return fallbackStr;
+    return "recently";
+  }
+  try {
+    const date = new Date(isoStr);
+    if (isNaN(date.getTime())) return fallbackStr || "recently";
+
+    const now = new Date();
+    const isToday =
+      date.getDate() === now.getDate() &&
+      date.getMonth() === now.getMonth() &&
+      date.getFullYear() === now.getFullYear();
+
+    const yesterday = new Date(now);
+    yesterday.setDate(now.getDate() - 1);
+    const isYesterday =
+      date.getDate() === yesterday.getDate() &&
+      date.getMonth() === yesterday.getMonth() &&
+      date.getFullYear() === yesterday.getFullYear();
+
+    const timeStr = date.toLocaleTimeString([], {
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+    });
+
+    if (isToday) return `today at ${timeStr}`;
+    if (isYesterday) return `yesterday at ${timeStr}`;
+
+    const dateStr = date.toLocaleDateString([], {
+      day: "numeric",
+      month: "short",
+    });
+    return `${dateStr} at ${timeStr}`;
+  } catch {
+    return fallbackStr || "recently";
+  }
+}
+
+// Formats status next to colleague name (e.g. Rishikesh - Online, Mahesh - Not available till 30-11-2026, Heikki - Last seen today at 8:01 PM)
 function getContactStatus(user: ChatUser): { statusText: string; colorClass: string; dotClass: string } {
   const isUserOffline =
     user.is_active === false ||
@@ -197,7 +240,14 @@ function getContactStatus(user: ChatUser): { statusText: string; colorClass: str
   if (status === "OFF_DUTY") {
     return { statusText: "Off-Duty", colorClass: "text-indigo-500 font-medium", dotClass: "bg-indigo-500" };
   }
-  return { statusText: "Offline", colorClass: "text-slate-400 dark:text-slate-500 font-normal", dotClass: "bg-slate-400" };
+
+  // OFFLINE: Show exact Last seen timestamp (e.g. Last seen today at 8:01 PM)
+  const lastSeenFormatted = formatLastSeen(user.last_seen_at, user.last_seen_str);
+  return {
+    statusText: `Last seen ${lastSeenFormatted}`,
+    colorClass: "text-slate-500 dark:text-slate-400 font-normal",
+    dotClass: "bg-slate-400",
+  };
 }
 
 export const LinkedInMessagingPage: React.FC<LinkedInMessagingPageProps> = ({
@@ -221,8 +271,13 @@ export const LinkedInMessagingPage: React.FC<LinkedInMessagingPageProps> = ({
   });
   const [isLoadingUsers, setIsLoadingUsers] = useState<boolean>(true);
 
-  // Selected peer for active conversation on the LEFT side (Starts as NULL, opens only on explicit click)
-  const [selectedPeer, setSelectedPeer] = useState<ChatUser | null>(null);
+  // Selected peer ID (Stored as primitive ID to prevent object reference polling jitter and auto-switching)
+  const [selectedPeerId, setSelectedPeerId] = useState<number | null>(null);
+  const selectedPeer = useMemo(() => {
+    if (!selectedPeerId) return null;
+    return chatUsers.find((u) => u.id === selectedPeerId) || null;
+  }, [chatUsers, selectedPeerId]);
+
   const [activeMessages, setActiveMessages] = useState<ChatMessage[]>([]);
   const [chatInput, setChatInput] = useState("");
   const [isPeerTyping, setIsPeerTyping] = useState(false);
@@ -346,8 +401,8 @@ export const LinkedInMessagingPage: React.FC<LinkedInMessagingPageProps> = ({
       return next;
     });
     // If the active conversation was archived, close it
-    if (selectedPeer?.id === userId) {
-      setSelectedPeer(null);
+    if (selectedPeerId === userId) {
+      setSelectedPeerId(null);
     }
   };
 
@@ -370,8 +425,8 @@ export const LinkedInMessagingPage: React.FC<LinkedInMessagingPageProps> = ({
       setChatUsers((prev) =>
         prev.map((u) => (u.id === peer.id ? { ...u, unread_count: isRead ? 0 : 1 } : u))
       );
-      if (selectedPeer?.id === peer.id && !isRead) {
-        setSelectedPeer(null);
+      if (selectedPeerId === peer.id && !isRead) {
+        setSelectedPeerId(null);
       }
     } catch {}
   };
@@ -384,9 +439,9 @@ export const LinkedInMessagingPage: React.FC<LinkedInMessagingPageProps> = ({
         `${API_BASE}/api/client/${effectiveClientId}/chat/messages?user_id=${currentUserId}&peer_id=${deleteConfirmPeer.id}`,
         { method: "DELETE" }
       );
-      if (selectedPeer?.id === deleteConfirmPeer.id) {
+      if (selectedPeerId === deleteConfirmPeer.id) {
         setActiveMessages([]);
-        setSelectedPeer(null);
+        setSelectedPeerId(null);
       }
       setChatUsers((prev) =>
         prev.map((u) => (u.id === deleteConfirmPeer.id ? { ...u, last_message: null, unread_count: 0 } : u))
@@ -511,11 +566,6 @@ export const LinkedInMessagingPage: React.FC<LinkedInMessagingPageProps> = ({
         });
         prevUnreadMapRef.current = unreadMap;
 
-        if (selectedPeer) {
-          const fresh = users.find((u) => u.id === selectedPeer.id);
-          if (fresh) setSelectedPeer(fresh);
-        }
-
         const me = users.find(
           (u) =>
             (currentUser?.email && u.email && u.email.toLowerCase() === currentUser.email.toLowerCase()) ||
@@ -533,16 +583,16 @@ export const LinkedInMessagingPage: React.FC<LinkedInMessagingPageProps> = ({
     } catch {
       setIsLoadingUsers(false);
     }
-  }, [effectiveClientId, currentUser, currentUserId, onUnreadCountChange, playNotificationSound, selectedPeer]);
+  }, [effectiveClientId, currentUser, currentUserId, onUnreadCountChange, playNotificationSound]);
 
   // Fetch active conversation messages
   const fetchMessages = useCallback(async () => {
-    if (!selectedPeer || !currentUser) return;
+    if (!selectedPeerId || !currentUser) return;
     try {
       const params = new URLSearchParams({
         channel_type: "DIRECT",
         user_id: String(currentUserId),
-        peer_id: String(selectedPeer.id),
+        peer_id: String(selectedPeerId),
       });
       const res = await fetch(
         `${API_BASE}/api/client/${effectiveClientId}/chat/messages?${params.toString()}`
@@ -571,7 +621,7 @@ export const LinkedInMessagingPage: React.FC<LinkedInMessagingPageProps> = ({
         setIsPeerTyping(Boolean(data.is_peer_typing));
       }
     } catch {}
-  }, [selectedPeer, currentUser, currentUserId, effectiveClientId, playNotificationSound]);
+  }, [selectedPeerId, currentUser, currentUserId, effectiveClientId, playNotificationSound]);
 
   // Polling intervals
   useEffect(() => {
@@ -585,7 +635,7 @@ export const LinkedInMessagingPage: React.FC<LinkedInMessagingPageProps> = ({
   }, [fetchUsers]);
 
   useEffect(() => {
-    if (!selectedPeer) return;
+    if (!selectedPeerId) return;
     fetchMessages();
     const msgInterval = setInterval(() => {
       if (typeof document !== "undefined" && document.visibilityState === "visible") {
@@ -593,7 +643,7 @@ export const LinkedInMessagingPage: React.FC<LinkedInMessagingPageProps> = ({
       }
     }, 2500);
     return () => clearInterval(msgInterval);
-  }, [selectedPeer, fetchMessages]);
+  }, [selectedPeerId, fetchMessages]);
 
   // Auto-scroll to bottom of conversation
   useEffect(() => {
@@ -690,7 +740,7 @@ export const LinkedInMessagingPage: React.FC<LinkedInMessagingPageProps> = ({
 
   // Select user to chat with (Triggered only when the user explicitly clicks a colleague)
   const handleSelectPeer = (peer: ChatUser) => {
-    setSelectedPeer(peer);
+    setSelectedPeerId(peer.id);
     setActiveMessages([]);
     setChatUsers((prev) =>
       prev.map((u) => (u.id === peer.id ? { ...u, unread_count: 0 } : u))
@@ -798,18 +848,28 @@ export const LinkedInMessagingPage: React.FC<LinkedInMessagingPageProps> = ({
           return pinnedUserIds.indexOf(a.id) - pinnedUserIds.indexOf(b.id);
         }
 
-        // 2. Unread messages on top
+        // 2. Stable activity sort: Recent conversations stay at top (does NOT jump when read!)
+        const aTime = a.last_message?.created_at
+          ? new Date(a.last_message.created_at).getTime()
+          : a.last_message
+          ? 1
+          : 0;
+        const bTime = b.last_message?.created_at
+          ? new Date(b.last_message.created_at).getTime()
+          : b.last_message
+          ? 1
+          : 0;
+
+        if (aTime > 0 && bTime > 0 && aTime !== bTime) {
+          return bTime - aTime;
+        }
+        if (aTime > 0 && bTime === 0) return -1;
+        if (aTime === 0 && bTime > 0) return 1;
+
+        // 3. Fallback unread count
         const aUnread = a.unread_count || 0;
         const bUnread = b.unread_count || 0;
-        if (aUnread > 0 && bUnread === 0) return -1;
-        if (aUnread === 0 && bUnread > 0) return 1;
-        if (aUnread > 0 && bUnread > 0 && aUnread !== bUnread) return bUnread - aUnread;
-
-        // 3. Recent chats on top
-        const aHasMsg = Boolean(a.last_message);
-        const bHasMsg = Boolean(b.last_message);
-        if (aHasMsg && !bHasMsg) return -1;
-        if (!aHasMsg && bHasMsg) return 1;
+        if (aUnread !== bUnread) return bUnread - aUnread;
 
         // 4. Alphabetical fallback
         return a.full_name.localeCompare(b.full_name);
@@ -856,7 +916,7 @@ export const LinkedInMessagingPage: React.FC<LinkedInMessagingPageProps> = ({
                     {/* Mobile Back to People List */}
                     <button
                       type="button"
-                      onClick={() => setSelectedPeer(null)}
+                      onClick={() => setSelectedPeerId(null)}
                       className="md:hidden p-1.5 -ml-1 rounded-xl text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-secondary)] cursor-pointer"
                       title="Back to teammates"
                     >
@@ -1002,7 +1062,7 @@ export const LinkedInMessagingPage: React.FC<LinkedInMessagingPageProps> = ({
                     {/* Close Active Chat button */}
                     <button
                       type="button"
-                      onClick={() => setSelectedPeer(null)}
+                      onClick={() => setSelectedPeerId(null)}
                       title="Close conversation"
                       className="p-1.5 rounded-xl text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-secondary)] cursor-pointer transition-colors"
                     >

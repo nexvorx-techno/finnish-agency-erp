@@ -152,9 +152,9 @@ export default function ClientPortalPage() {
     return () => clearTimeout(timer);
   }, []);
 
-  // Background poll for top bar unread messages badge (every 12 seconds)
+  // Background poll for top bar unread messages badge (every 15 seconds when not on messaging page)
   useEffect(() => {
-    if (!currentUser?.clientId) return;
+    if (!currentUser?.clientId || activeModule === "messaging") return;
     const fetchTopBarUnread = async () => {
       try {
         const uid = currentUser.userId;
@@ -168,9 +168,9 @@ export default function ClientPortalPage() {
       } catch {}
     };
     fetchTopBarUnread();
-    const interval = setInterval(fetchTopBarUnread, 12000);
+    const interval = setInterval(fetchTopBarUnread, 15000);
     return () => clearInterval(interval);
-  }, [currentUser?.clientId, currentUser?.userId]);
+  }, [currentUser?.clientId, currentUser?.userId, activeModule]);
 
   const triggerLoader = useCallback((duration = 600) => {
     if (loaderTimeoutRef.current) {
