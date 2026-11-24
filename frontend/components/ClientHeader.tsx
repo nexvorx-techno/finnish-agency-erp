@@ -5,6 +5,7 @@ import {
   Search,
   SlidersHorizontal,
   Bell,
+  MessageSquare,
   Building,
   ArrowLeft,
   X,
@@ -43,6 +44,8 @@ interface ClientHeaderProps {
   canSwitchSite?: boolean;
   onOpenPreferences: () => void;
   onOpenProfile?: () => void;
+  onOpenMessaging?: () => void;
+  unreadMessagesCount?: number;
   currentUser?: { fullName: string; role: string; avatarUrl?: string } | null;
   isLoading?: boolean;
   clientId?: number;
@@ -62,6 +65,8 @@ export const ClientHeader: React.FC<ClientHeaderProps> = ({
   canSwitchSite,
   onOpenPreferences,
   onOpenProfile,
+  onOpenMessaging,
+  unreadMessagesCount = 0,
   currentUser,
   clientId = 1,
   currentUserId,
@@ -203,6 +208,8 @@ export const ClientHeader: React.FC<ClientHeaderProps> = ({
         return "User Management / User Directory";
       case "m1.9_create_user":
         return "User Management / Create New User";
+      case "messaging":
+        return "Team Communications / Messaging";
       default:
         return "Client Workspace";
     }
@@ -334,7 +341,28 @@ export const ClientHeader: React.FC<ClientHeaderProps> = ({
             )}
           </div>
 
-          {/* 3. Preferences */}
+          {/* 3. Messaging (LinkedIn-Style Top Bar Launcher) */}
+          {onOpenMessaging && (
+            <button
+              type="button"
+              onClick={onOpenMessaging}
+              title="Messaging & Team Chat"
+              className={`relative p-2 rounded-xl border transition-all shadow-sm cursor-pointer ${
+                activeModule === "messaging"
+                  ? "border-[var(--accent-color)] bg-[var(--bg-secondary)] text-[var(--accent-color)]"
+                  : "border-[var(--border-color)] bg-[var(--bg-card)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-secondary)]"
+              }`}
+            >
+              <MessageSquare className="w-4 h-4" />
+              {unreadMessagesCount > 0 && (
+                <span className="absolute -top-1 -right-1 px-1.5 py-0.2 rounded-full bg-rose-500 text-white font-black text-[9px] min-w-4 text-center ring-2 ring-white dark:ring-slate-900 animate-pulse">
+                  {unreadMessagesCount}
+                </span>
+              )}
+            </button>
+          )}
+
+          {/* 4. Preferences */}
           <button
             type="button"
             onClick={onOpenPreferences}
@@ -344,7 +372,7 @@ export const ClientHeader: React.FC<ClientHeaderProps> = ({
             <SlidersHorizontal className="w-4 h-4" />
           </button>
 
-          {/* 4. Notification Center with Real-Time Approval Flow Notifications */}
+          {/* 5. Notification Center with Real-Time Approval Flow Notifications */}
           <div className="relative" ref={notifRef}>
             <button
               type="button"

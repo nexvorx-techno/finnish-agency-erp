@@ -122,6 +122,7 @@ interface RightRailProps {
   clientId?: number;
   companyName?: string;
   currentUser?: CurrentUser;
+  onUnreadCountChange?: (count: number) => void;
 }
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
@@ -192,6 +193,7 @@ export const RightRail: React.FC<RightRailProps> = ({
   clientId = 1,
   companyName = "Valmet Technologies Oy",
   currentUser,
+  onUnreadCountChange,
 }) => {
   const effectiveClientId = clientId || currentUser?.clientId || 1;
 
@@ -424,6 +426,12 @@ export const RightRail: React.FC<RightRailProps> = ({
         });
         prevUnreadMapRef.current = unreadMap;
 
+        const totalUnread = users.reduce(
+          (sum, u) => sum + (u.id !== currentUserId ? u.unread_count || 0 : 0),
+          0
+        );
+        onUnreadCountChange?.(totalUnread);
+
         // Sync my own availability
         const me = users.find(
           (u) =>
@@ -445,7 +453,7 @@ export const RightRail: React.FC<RightRailProps> = ({
     } catch {
       setIsLoadingUsers(false);
     }
-  }, [effectiveClientId, currentUser, currentUserId, playNotificationSound]);
+  }, [effectiveClientId, currentUser, currentUserId, playNotificationSound, onUnreadCountChange]);
 
   // Fetch Floating Box Messages (1-on-1 direct chat + typing status)
   const fetchFloatingMessages = useCallback(async () => {

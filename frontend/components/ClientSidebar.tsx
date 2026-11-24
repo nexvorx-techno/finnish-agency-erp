@@ -27,6 +27,7 @@ import {
   UserPlus,
   GitBranch,
   User,
+  MessageSquare,
 } from "lucide-react";
 
 interface SubMenuItem {
@@ -238,6 +239,19 @@ export const ClientSidebar: React.FC<ClientSidebarProps> = ({
           id: "m1.8_approval_flow_master",
           label: "Master Approval Flow",
           icon: GitBranch,
+        },
+      ],
+    },
+    {
+      id: "grp_communications",
+      title: "Communications",
+      icon: MessageSquare,
+      items: [
+        {
+          id: "messaging",
+          label: "Team Messaging",
+          icon: MessageSquare,
+          statusBadge: "Live",
         },
       ],
     },

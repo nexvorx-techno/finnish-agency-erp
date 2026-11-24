@@ -18,6 +18,7 @@ import { MasterDataModule, MasterSubTab } from "../components/MasterDataModule";
 import { ShiftPlanningModule, RosterSubTab } from "../components/ShiftPlanningModule";
 import { InvoicesSettlementModule } from "../components/InvoicesSettlementModule";
 import { WorkerOperationsModule } from "../components/WorkerOperationsModule";
+import { LinkedInMessagingPage } from "../components/LinkedInMessagingPage";
 import { UserProfileModal } from "../components/UserProfileModal";
 import { GlobalLoader } from "../components/GlobalLoader";
 import { ArrowLeft, X } from "lucide-react";
@@ -138,6 +139,7 @@ export default function ClientPortalPage() {
 
   const [activeModule, setActiveModuleState] = useState("dashboard");
   const [navHistory, setNavHistory] = useState<string[]>(["dashboard"]);
+  const [unreadChatCount, setUnreadChatCount] = useState<number>(0);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isLoadingOverlay, setIsLoadingOverlay] = useState(false);
   const [isInitialLoading, setIsInitialLoading] = useState(true);
@@ -740,6 +742,8 @@ export default function ClientPortalPage() {
           canSwitchSite={canSwitchSite}
           onOpenPreferences={() => setIsPreferencesOpen(true)}
           onOpenProfile={() => setIsProfileOpen(true)}
+          onOpenMessaging={() => navigateToModule("messaging")}
+          unreadMessagesCount={unreadChatCount}
           currentUser={currentUser}
           isLoading={isSyncing}
           clientId={currentUser.clientId}
@@ -747,7 +751,11 @@ export default function ClientPortalPage() {
         />
 
         {/* Scrollable Canvas */}
-        <main className={`flex-1 overflow-y-auto p-3.5 sm:p-6 lg:p-8 transition-colors ${menuPosition === "bottom" ? "lg:pb-32 pb-6" : ""}`}>
+        <main
+          className={`flex-1 overflow-y-auto transition-colors ${
+            activeModule === "messaging" ? "p-2 sm:p-4 h-full flex flex-col" : "p-3.5 sm:p-6 lg:p-8"
+          } ${menuPosition === "bottom" ? "lg:pb-32 pb-6" : ""}`}
+        >
           {activeModule === "dashboard" ? (
             <ClientDashboard
               clientId={currentUser.clientId}
@@ -759,6 +767,13 @@ export default function ClientPortalPage() {
               onNavigateToRequisitions={() => navigateToModule("m1.2_req")}
               onNavigateToInvoices={() => navigateToModule("m1.6_invoices")}
               onNavigateToApprovals={(modId) => navigateToModule(modId || "m1.4_overtime")}
+            />
+          ) : activeModule === "messaging" ? (
+            <LinkedInMessagingPage
+              clientId={currentUser.clientId}
+              companyName={summary.client_name}
+              currentUser={currentUser}
+              onUnreadCountChange={setUnreadChatCount}
             />
           ) : activeModule.startsWith("m1.2") ? (
             <TalentAcquisitionModule
@@ -901,12 +916,15 @@ export default function ClientPortalPage() {
         </main>
       </div>
 
-      {/* 3. Internal Portal Chat Right Rail */}
-      <RightRail
-        clientId={currentUser.clientId || 1}
-        companyName={summary.client_name}
-        currentUser={currentUser}
-      />
+      {/* 3. Internal Portal Chat Right Rail (Floating docked widget, hidden on dedicated full messaging page) */}
+      {activeModule !== "messaging" && (
+        <RightRail
+          clientId={currentUser.clientId || 1}
+          companyName={summary.client_name}
+          currentUser={currentUser}
+          onUnreadCountChange={setUnreadChatCount}
+        />
+      )}
 
       {/* 4. Bottom Side Bar (Rendered when menuPosition === 'bottom' on desktop only) */}
       {menuPosition === "bottom" && (
