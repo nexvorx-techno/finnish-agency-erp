@@ -429,8 +429,19 @@ export const ClientHeader: React.FC<ClientHeaderProps> = ({
                 {/* Notifications List */}
                 <div className="max-h-[380px] overflow-y-auto divide-y divide-[var(--border-color)] custom-scrollbar">
                   {isLoadingNotifs && notifications.length === 0 ? (
-                    <div className="p-8 text-center text-xs text-[var(--text-secondary)]">
-                      Loading notifications...
+                    <div className="p-3 space-y-2.5">
+                      {[1, 2, 3].map((idx) => (
+                        <div
+                          key={idx}
+                          className="flex items-start gap-3 p-3 rounded-xl bg-[var(--bg-secondary)]/40 border border-[var(--border-color)]/60 animate-pulse"
+                        >
+                          <div className="w-8 h-8 rounded-xl bg-slate-200 dark:bg-slate-700/60 shrink-0" />
+                          <div className="flex-1 space-y-2 py-0.5">
+                            <div className="h-3 bg-slate-200 dark:bg-slate-700/60 rounded w-4/5" />
+                            <div className="h-2.5 bg-slate-200/70 dark:bg-slate-700/40 rounded w-1/2" />
+                          </div>
+                        </div>
+                      ))}
                     </div>
                   ) : notifications.length === 0 ? (
                     <div className="p-8 text-center space-y-2">

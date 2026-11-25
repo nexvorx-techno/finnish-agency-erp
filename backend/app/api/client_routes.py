@@ -480,6 +480,11 @@ def get_live_workforce(
         sites_query = sites_query.filter(ClientSite.id.in_(user_assigned_ids))
     sites = sites_query.all()
 
+    # Ensure worker deployments exist for client so data displays autonomously for any operational user
+    if db.query(WorkerDeployment).filter(WorkerDeployment.client_id == client_id).count() == 0:
+        from app.api.operations_routes import seed_worker_deployments
+        seed_worker_deployments(client_id, db)
+
     deployments_query = db.query(WorkerDeployment).filter(
         WorkerDeployment.client_id == client_id,
         WorkerDeployment.status.in_(["ACTIVE", "SICK_LEAVE", "ON_LEAVE"])

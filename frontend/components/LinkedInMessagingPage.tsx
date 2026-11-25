@@ -270,6 +270,7 @@ export const LinkedInMessagingPage: React.FC<LinkedInMessagingPageProps> = ({
     return [];
   });
   const [isLoadingUsers, setIsLoadingUsers] = useState<boolean>(true);
+  const [isLoadingMessages, setIsLoadingMessages] = useState<boolean>(false);
 
   // Selected peer ID (Stored as primitive ID to prevent object reference polling jitter and auto-switching)
   const [selectedPeerId, setSelectedPeerId] = useState<number | null>(null);
@@ -620,7 +621,9 @@ export const LinkedInMessagingPage: React.FC<LinkedInMessagingPageProps> = ({
         });
         setIsPeerTyping(Boolean(data.is_peer_typing));
       }
-    } catch {}
+    } catch {} finally {
+      setIsLoadingMessages(false);
+    }
   }, [selectedPeerId, currentUser, currentUserId, effectiveClientId, playNotificationSound]);
 
   // Polling intervals
@@ -740,8 +743,11 @@ export const LinkedInMessagingPage: React.FC<LinkedInMessagingPageProps> = ({
 
   // Select user to chat with (Triggered only when the user explicitly clicks a colleague)
   const handleSelectPeer = (peer: ChatUser) => {
-    setSelectedPeerId(peer.id);
-    setActiveMessages([]);
+    if (selectedPeerId !== peer.id) {
+      setSelectedPeerId(peer.id);
+      setActiveMessages([]);
+      setIsLoadingMessages(true);
+    }
     setChatUsers((prev) =>
       prev.map((u) => (u.id === peer.id ? { ...u, unread_count: 0 } : u))
     );
@@ -1075,7 +1081,36 @@ export const LinkedInMessagingPage: React.FC<LinkedInMessagingPageProps> = ({
 
             {/* 2. Messages Stream */}
             <div className="flex-1 overflow-y-auto p-4 space-y-3.5 bg-[var(--bg-secondary)]/20 custom-scrollbar">
-              {activeMessages.length === 0 ? (
+              {isLoadingMessages && activeMessages.length === 0 ? (
+                <div className="p-2 space-y-4">
+                  {/* Incoming bubble skeleton */}
+                  <div className="flex items-start gap-2.5 max-w-[75%] animate-pulse">
+                    <div className="w-7 h-7 rounded-full bg-slate-200 dark:bg-slate-700/60 shrink-0" />
+                    <div className="space-y-1.5 flex-1">
+                      <div className="h-10 w-48 rounded-2xl rounded-tl-xs bg-slate-200 dark:bg-slate-700/60" />
+                      <div className="h-2 w-16 bg-slate-200/60 dark:bg-slate-700/40 rounded" />
+                    </div>
+                  </div>
+                  {/* Outgoing bubble skeleton */}
+                  <div className="flex flex-col items-end ml-auto max-w-[75%] animate-pulse">
+                    <div className="h-10 w-52 rounded-2xl rounded-tr-xs bg-indigo-200/50 dark:bg-indigo-900/30 border border-indigo-300/30 dark:border-indigo-800/40" />
+                    <div className="h-2 w-14 bg-indigo-200/40 dark:bg-indigo-900/30 rounded mt-1.5 mr-1" />
+                  </div>
+                  {/* Incoming bubble skeleton */}
+                  <div className="flex items-start gap-2.5 max-w-[75%] animate-pulse">
+                    <div className="w-7 h-7 rounded-full bg-slate-200 dark:bg-slate-700/60 shrink-0" />
+                    <div className="space-y-1.5 flex-1">
+                      <div className="h-14 w-60 rounded-2xl rounded-tl-xs bg-slate-200 dark:bg-slate-700/60" />
+                      <div className="h-2 w-16 bg-slate-200/60 dark:bg-slate-700/40 rounded" />
+                    </div>
+                  </div>
+                  {/* Outgoing bubble skeleton */}
+                  <div className="flex flex-col items-end ml-auto max-w-[75%] animate-pulse">
+                    <div className="h-8 w-36 rounded-2xl rounded-tr-xs bg-indigo-200/50 dark:bg-indigo-900/30 border border-indigo-300/30 dark:border-indigo-800/40" />
+                    <div className="h-2 w-14 bg-indigo-200/40 dark:bg-indigo-900/30 rounded mt-1.5 mr-1" />
+                  </div>
+                </div>
+              ) : activeMessages.length === 0 ? (
                 <div className="h-full flex flex-col items-center justify-center text-center p-6 space-y-3 text-[var(--text-secondary)]">
                   <div className="w-12 h-12 rounded-2xl bg-[var(--accent-color)]/10 text-[var(--accent-color)] flex items-center justify-center">
                     <MessageSquare className="w-6 h-6" />
@@ -1356,8 +1391,20 @@ export const LinkedInMessagingPage: React.FC<LinkedInMessagingPageProps> = ({
         {/* 2. Colleagues List (Sorted: Pinned -> Unread -> Recent chats -> Alphabetical) */}
         <div className="flex-1 overflow-y-auto divide-y divide-[var(--border-color)]/60 custom-scrollbar">
           {isLoadingUsers && chatUsers.length === 0 ? (
-            <div className="p-8 text-center text-xs text-[var(--text-secondary)]">
-              Loading colleagues...
+            <div className="p-3 space-y-2.5">
+              {[1, 2, 3, 4, 5].map((idx) => (
+                <div
+                  key={idx}
+                  className="flex items-center gap-3 p-3 rounded-xl bg-[var(--bg-secondary)]/30 border border-[var(--border-color)]/50 animate-pulse"
+                >
+                  <div className="w-10 h-10 rounded-full bg-slate-200 dark:bg-slate-700/60 shrink-0" />
+                  <div className="flex-1 space-y-1.5">
+                    <div className="h-3.5 bg-slate-200 dark:bg-slate-700/60 rounded w-28" />
+                    <div className="h-2.5 bg-slate-200/70 dark:bg-slate-700/40 rounded w-20" />
+                  </div>
+                  <div className="w-12 h-3.5 rounded-full bg-slate-200/60 dark:bg-slate-700/40" />
+                </div>
+              ))}
             </div>
           ) : filteredUsers.length === 0 ? (
             <div className="p-8 text-center space-y-2 text-[var(--text-secondary)]">
