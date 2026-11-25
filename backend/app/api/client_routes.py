@@ -437,6 +437,29 @@ def mark_all_notifications_read(client_id: int, user_id: Optional[int] = None, d
     return {"status": "all_read"}
 
 
+@router.delete("/{client_id}/notifications/clear")
+def clear_all_notifications(client_id: int, user_id: Optional[int] = None, db: Session = Depends(get_db)):
+    query = db.query(ClientNotification).filter(ClientNotification.client_id == client_id)
+    if user_id:
+        query = query.filter((ClientNotification.user_id == user_id) | (ClientNotification.user_id == None))
+    deleted_count = query.delete(synchronize_session=False)
+    db.commit()
+    return {"status": "cleared", "deleted_count": deleted_count}
+
+
+@router.delete("/{client_id}/notifications/{notification_id}")
+def delete_single_notification(client_id: int, notification_id: int, db: Session = Depends(get_db)):
+    notif = db.query(ClientNotification).filter(
+        ClientNotification.client_id == client_id,
+        ClientNotification.id == notification_id
+    ).first()
+    if not notif:
+        raise HTTPException(status_code=404, detail="Notification not found")
+    db.delete(notif)
+    db.commit()
+    return {"status": "deleted", "id": notification_id}
+
+
 @router.get("/{client_id}/deployments", response_model=List[WorkerDeploymentOut])
 def get_client_deployments(
     client_id: int,

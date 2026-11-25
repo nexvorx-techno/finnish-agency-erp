@@ -13,6 +13,8 @@ import {
   Workflow,
   Menu,
   Maximize2,
+  Trash2,
+  ChevronDown,
 } from "lucide-react";
 
 export interface FloatingChatUser {
@@ -97,6 +99,7 @@ export const ClientHeader: React.FC<ClientHeaderProps> = ({
   const [isNotifOpen, setIsNotifOpen] = useState(false);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [isLoadingNotifs, setIsLoadingNotifs] = useState(false);
+  const [notifVisibleLimit, setNotifVisibleLimit] = useState(5);
   const notifRef = useRef<HTMLDivElement>(null);
 
   const fetchNotifications = useCallback(async () => {
@@ -104,8 +107,8 @@ export const ClientHeader: React.FC<ClientHeaderProps> = ({
     setIsLoadingNotifs(true);
     try {
       const url = currentUserId
-        ? `${API_BASE}/api/client/${clientId}/notifications?user_id=${currentUserId}`
-        : `${API_BASE}/api/client/${clientId}/notifications`;
+        ? `${API_BASE}/api/client/${clientId}/notifications?user_id=${currentUserId}&limit=100`
+        : `${API_BASE}/api/client/${clientId}/notifications?limit=100`;
       const res = await fetch(url);
       if (res.ok) {
         const data = await res.json();
@@ -150,6 +153,27 @@ export const ClientHeader: React.FC<ClientHeaderProps> = ({
         : `${API_BASE}/api/client/${clientId}/notifications/mark-all-read`;
       await fetch(url, { method: "POST" });
       setNotifications((prev) => prev.map((n) => ({ ...n, is_read: true })));
+    } catch {}
+  };
+
+  const handleClearAllNotifications = async (e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    try {
+      const url = currentUserId
+        ? `${API_BASE}/api/client/${clientId}/notifications/clear?user_id=${currentUserId}`
+        : `${API_BASE}/api/client/${clientId}/notifications/clear`;
+      await fetch(url, { method: "DELETE" });
+      setNotifications([]);
+    } catch {}
+  };
+
+  const handleDeleteNotification = async (notifId: number, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    try {
+      await fetch(`${API_BASE}/api/client/${clientId}/notifications/${notifId}`, {
+        method: "DELETE",
+      });
+      setNotifications((prev) => prev.filter((n) => n.id !== notifId));
     } catch {}
   };
 
@@ -624,29 +648,43 @@ export const ClientHeader: React.FC<ClientHeaderProps> = ({
             {isNotifOpen && (
               <div className="absolute right-0 top-full mt-2 w-[calc(100vw-1.5rem)] sm:w-96 max-w-sm rounded-2xl bg-[var(--bg-card)] border border-[var(--border-color)] shadow-2xl z-50 overflow-hidden animate-in fade-in zoom-in-95 duration-150">
                 {/* Header */}
-                <div className="p-3.5 border-b border-[var(--border-color)] bg-[var(--bg-secondary)] flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <div className="w-6 h-6 rounded-lg bg-[var(--accent-color)]/10 text-[var(--accent-color)] flex items-center justify-center">
+                <div className="p-3 border-b border-[var(--border-color)] bg-[var(--bg-secondary)] flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <div className="w-6 h-6 rounded-lg bg-[var(--accent-color)]/10 text-[var(--accent-color)] flex items-center justify-center shrink-0">
                       <Bell className="w-3.5 h-3.5" />
                     </div>
-                    <div>
-                      <h4 className="text-xs font-black text-[var(--text-primary)]">Notifications</h4>
-                      <p className="text-[10px] text-[var(--text-secondary)]">
+                    <div className="min-w-0">
+                      <h4 className="text-xs font-black text-[var(--text-primary)] leading-tight">Notifications</h4>
+                      <p className="text-[10px] text-[var(--text-secondary)] truncate">
                         {unreadCount > 0 ? `${unreadCount} unread alert${unreadCount > 1 ? "s" : ""}` : "All notifications caught up"}
                       </p>
                     </div>
                   </div>
 
-                  {unreadCount > 0 && (
-                    <button
-                      type="button"
-                      onClick={handleMarkAllRead}
-                      className="text-[10px] font-bold text-[var(--accent-color)] hover:underline flex items-center gap-1 cursor-pointer"
-                    >
-                      <CheckCheck className="w-3 h-3" />
-                      <span>Mark all read</span>
-                    </button>
-                  )}
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    {unreadCount > 0 && (
+                      <button
+                        type="button"
+                        onClick={handleMarkAllRead}
+                        title="Mark all notifications as read"
+                        className="text-[10px] font-bold text-[var(--accent-color)] hover:underline flex items-center gap-1 cursor-pointer px-1.5 py-0.5 rounded hover:bg-[var(--accent-light)]/40 transition-colors"
+                      >
+                        <CheckCheck className="w-3 h-3" />
+                        <span>Mark all read</span>
+                      </button>
+                    )}
+                    {notifications.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={handleClearAllNotifications}
+                        title="Clear all notifications"
+                        className="text-[10px] font-bold text-red-500 hover:text-red-600 hover:underline flex items-center gap-1 cursor-pointer px-1.5 py-0.5 rounded hover:bg-red-50 dark:hover:bg-red-950/40 transition-colors"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                        <span>Clear</span>
+                      </button>
+                    )}
+                  </div>
                 </div>
 
                 {/* Notifications List */}
@@ -677,96 +715,121 @@ export const ClientHeader: React.FC<ClientHeaderProps> = ({
                       </p>
                     </div>
                   ) : (
-                    notifications.map((n) => {
-                      const resolveTargetModule = (): string | null => {
-                        if (n.target_module && n.target_module.trim()) {
-                          return n.target_module.trim();
-                        }
-                        const hay = `${n.approval_type || ""} ${n.title || ""} ${n.message || ""}`.toLowerCase();
-                        if (hay.includes("m1.2") || hay.includes("requisition") || hay.includes("work requirement") || hay.includes("req-")) {
-                          return "m1.2_req";
-                        }
-                        if (hay.includes("m1.6") || hay.includes("invoice") || hay.includes("inv-")) {
-                          return "m1.6_invoices";
-                        }
-                        if (hay.includes("m1.3_changes") || hay.includes("shift change")) {
-                          return "m1.3_changes";
-                        }
-                        if (hay.includes("m1.3") || hay.includes("roster")) {
-                          return "m1.3_builder";
-                        }
-                        if (hay.includes("m1.5_safety") || hay.includes("safety") || hay.includes("inc-")) {
-                          return "m1.5_safety";
-                        }
-                        if (hay.includes("m1.5") || hay.includes("worker action")) {
-                          return "m1.5_actions";
-                        }
-                        return null;
-                      };
-
-                      const targetModule = resolveTargetModule();
-                      const shortDisplayText = (n.message || n.title || "").trim();
-
-                      const handleCardClick = () => {
-                        if (!n.is_read) {
-                          handleMarkAsRead(n.id);
-                        }
-                        setIsNotifOpen(false);
-                        if (targetModule && onNavigateToModule) {
-                          onNavigateToModule(targetModule);
-                          if (typeof window !== "undefined") {
-                            setTimeout(() => {
-                              window.dispatchEvent(
-                                new CustomEvent("open-approval-target", {
-                                  detail: {
-                                    module: targetModule,
-                                    referenceId: n.reference_id || null,
-                                  },
-                                })
-                              );
-                            }, 80);
+                    <>
+                      {notifications.slice(0, notifVisibleLimit).map((n) => {
+                        const resolveTargetModule = (): string | null => {
+                          if (n.target_module && n.target_module.trim()) {
+                            return n.target_module.trim();
                           }
-                        }
-                      };
+                          const hay = `${n.approval_type || ""} ${n.title || ""} ${n.message || ""}`.toLowerCase();
+                          if (hay.includes("m1.2") || hay.includes("requisition") || hay.includes("work requirement") || hay.includes("req-")) {
+                            return "m1.2_req";
+                          }
+                          if (hay.includes("m1.6") || hay.includes("invoice") || hay.includes("inv-")) {
+                            return "m1.6_invoices";
+                          }
+                          if (hay.includes("m1.3_changes") || hay.includes("shift change")) {
+                            return "m1.3_changes";
+                          }
+                          if (hay.includes("m1.3") || hay.includes("roster")) {
+                            return "m1.3_builder";
+                          }
+                          if (hay.includes("m1.5_safety") || hay.includes("safety") || hay.includes("inc-")) {
+                            return "m1.5_safety";
+                          }
+                          if (hay.includes("m1.5") || hay.includes("worker action")) {
+                            return "m1.5_actions";
+                          }
+                          return null;
+                        };
 
-                      return (
-                        <div
-                          key={n.id}
-                          onClick={handleCardClick}
-                          className={`px-3.5 py-3 transition-colors flex items-center gap-3 cursor-pointer ${
-                            n.is_read
-                              ? "bg-[var(--bg-card)] opacity-80 hover:bg-[var(--bg-secondary)]/60"
-                              : "bg-[var(--accent-light)]/40 hover:bg-[var(--accent-light)]/70 border-l-3 border-l-[var(--accent-color)]"
-                          }`}
-                        >
-                          <div className="shrink-0">
-                            <div className="w-7 h-7 rounded-xl bg-blue-500/10 text-[var(--accent-color)] flex items-center justify-center">
-                              <Workflow className="w-3.5 h-3.5" />
+                        const targetModule = resolveTargetModule();
+                        const shortDisplayText = (n.message || n.title || "").trim();
+
+                        const handleCardClick = () => {
+                          if (!n.is_read) {
+                            handleMarkAsRead(n.id);
+                          }
+                          setIsNotifOpen(false);
+                          if (targetModule && onNavigateToModule) {
+                            onNavigateToModule(targetModule);
+                            if (typeof window !== "undefined") {
+                              setTimeout(() => {
+                                window.dispatchEvent(
+                                  new CustomEvent("open-approval-target", {
+                                    detail: {
+                                      module: targetModule,
+                                      referenceId: n.reference_id || null,
+                                    },
+                                  })
+                                );
+                              }, 80);
+                            }
+                          }
+                        };
+
+                        return (
+                          <div
+                            key={n.id}
+                            onClick={handleCardClick}
+                            className={`group px-3.5 py-3 transition-colors flex items-center gap-3 cursor-pointer ${
+                              n.is_read
+                                ? "bg-[var(--bg-card)] opacity-80 hover:bg-[var(--bg-secondary)]/60"
+                                : "bg-[var(--accent-light)]/40 hover:bg-[var(--accent-light)]/70 border-l-3 border-l-[var(--accent-color)]"
+                            }`}
+                          >
+                            <div className="shrink-0">
+                              <div className="w-7 h-7 rounded-xl bg-blue-500/10 text-[var(--accent-color)] flex items-center justify-center">
+                                <Workflow className="w-3.5 h-3.5" />
+                              </div>
+                            </div>
+
+                            <div className="flex-1 min-w-0 pr-1">
+                              <p
+                                className={`text-xs leading-snug ${
+                                  n.is_read ? "font-medium text-[var(--text-primary)]" : "font-bold text-[var(--text-primary)]"
+                                }`}
+                              >
+                                {shortDisplayText}
+                              </p>
+                              <span className="text-[10px] text-[var(--text-secondary)] mt-0.5 block">
+                                {formatTimeAgo(n.created_at)}
+                              </span>
+                            </div>
+
+                            <div className="flex items-center gap-1 shrink-0">
+                              {!n.is_read && (
+                                <span
+                                  title="Unread"
+                                  className="w-2 h-2 rounded-full bg-[var(--accent-color)]"
+                                />
+                              )}
+                              <button
+                                type="button"
+                                onClick={(e) => handleDeleteNotification(n.id, e)}
+                                title="Dismiss notification"
+                                className="opacity-0 group-hover:opacity-100 hover:text-red-500 text-[var(--text-secondary)] p-1 rounded hover:bg-red-50 dark:hover:bg-red-950/40 transition-all cursor-pointer"
+                              >
+                                <X className="w-3.5 h-3.5" />
+                              </button>
                             </div>
                           </div>
+                        );
+                      })}
 
-                          <div className="flex-1 min-w-0">
-                            <p
-                              className={`text-xs leading-snug ${
-                                n.is_read ? "font-medium text-[var(--text-primary)]" : "font-bold text-[var(--text-primary)]"
-                              }`}
-                            >
-                              {shortDisplayText}
-                            </p>
-                            <span className="text-[10px] text-[var(--text-secondary)] mt-0.5 block">
-                              {formatTimeAgo(n.created_at)}
-                            </span>
-                          </div>
-
-                          {!n.is_read && (
-                            <span
-                              title="Unread"
-                              className="w-2 h-2 rounded-full bg-[var(--accent-color)] shrink-0"
-                            />
-                          )}
+                      {notifications.length > notifVisibleLimit && (
+                        <div className="p-2.5 border-t border-[var(--border-color)] bg-[var(--bg-secondary)]/30 text-center sticky bottom-0 backdrop-blur-xs">
+                          <button
+                            type="button"
+                            onClick={() => setNotifVisibleLimit((prev) => prev + 5)}
+                            className="w-full py-1.5 px-3 rounded-xl bg-[var(--bg-card)] hover:bg-[var(--accent-light)]/50 text-[var(--text-primary)] hover:text-[var(--accent-color)] text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer border border-[var(--border-color)] shadow-xs"
+                          >
+                            <ChevronDown className="w-3.5 h-3.5" />
+                            <span>Show more older ({notifications.length - notifVisibleLimit} older)</span>
+                          </button>
                         </div>
-                      );
-                    })
+                      )}
+                    </>
                   )}
                 </div>
 
