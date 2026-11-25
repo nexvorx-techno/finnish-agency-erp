@@ -11,6 +11,7 @@ from app.core.approval_engine import (
     notify_level_1_on_create,
     execute_sequential_approval_step,
     get_approval_step_metadata,
+    reconcile_record_approval_state,
 )
 from app.models.talent import JobRequisition, CandidateShortlist, InterviewSlot, RelocationMilestone
 from app.models.client import ClientSite
@@ -62,6 +63,14 @@ class InterviewFeedbackSchema(BaseModel):
 
 
 def serialize_requisition(r: JobRequisition, db: Session) -> dict:
+    reconcile_record_approval_state(
+        db=db,
+        client_id=r.client_id,
+        flow_key="m1.2_req",
+        record=r,
+        reference_code=r.req_code,
+        item_label_override=f"new work requirement ({r.req_code})",
+    )
     site = db.query(ClientSite).filter(ClientSite.id == r.site_id).first()
     candidates_count = (
         db.query(CandidateShortlist)

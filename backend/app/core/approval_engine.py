@@ -210,6 +210,85 @@ def get_approval_step_metadata(
     }
 
 
+def reconcile_record_approval_state(
+    db: Session,
+    client_id: int,
+    flow_key: str,
+    record: Any,
+    reference_code: Optional[str] = None,
+    item_label_override: Optional[str] = None,
+) -> bool:
+    """
+    Guarantees strict sequential approval integrity:
+    If an active Master Approval Flow exists with N levels, and a record has fewer than N approved
+    steps in its history (e.g. approved step 1 of 2), it is strictly held in PENDING_INTERNAL_APPROVAL
+    (step K+1 of N), preventing premature RELEASED_TO_AGENCY status, and ensures Level K+1 approver is notified!
+    """
+    levels = get_active_flow_levels(db, client_id, flow_key)
+    if not levels:
+        return False
+
+    try:
+        raw_history = getattr(record, "approval_history", None)
+        history = json.loads(raw_history) if raw_history else []
+        if not isinstance(history, list):
+            history = []
+    except Exception:
+        history = []
+
+    approved_steps = len([h for h in history if str(h.get("action", "")).upper() == "APPROVED"])
+    total_levels = len(levels)
+
+    if approved_steps < total_levels:
+        needed_step = approved_steps + 1
+        meta = get_flow_meta(flow_key)
+        short_item = item_label_override or meta["short_item"]
+        code_suffix = f" ({reference_code})" if (reference_code and reference_code not in short_item) else ""
+
+        changed = False
+        if getattr(record, "status", None) != "PENDING_INTERNAL_APPROVAL":
+            record.status = "PENDING_INTERNAL_APPROVAL"
+            changed = True
+        if getattr(record, "current_approval_step", None) != needed_step:
+            record.current_approval_step = needed_step
+            changed = True
+        if getattr(record, "total_approval_steps", None) != total_levels:
+            record.total_approval_steps = total_levels
+            changed = True
+
+        # Ensure Level `needed_step` approver has a pending notification
+        next_lvl = levels[needed_step - 1]
+        next_user_id = resolve_level_approver_user_id(db, client_id, next_lvl)
+        if next_user_id:
+            existing_notif = (
+                db.query(ClientNotification)
+                .filter(
+                    ClientNotification.client_id == client_id,
+                    ClientNotification.user_id == next_user_id,
+                    ClientNotification.target_module == meta["target_module"],
+                    ClientNotification.reference_id == record.id,
+                    ClientNotification.approver_level == f"Level {needed_step}",
+                )
+                .first()
+            )
+            if not existing_notif:
+                create_short_notification(
+                    db=db,
+                    client_id=client_id,
+                    recipient_user_id=next_user_id,
+                    short_text=f"Approval requested for {short_item}{code_suffix} (Level {needed_step}).",
+                    target_module=meta["target_module"],
+                    reference_id=record.id,
+                    approver_level=f"Level {needed_step}",
+                )
+                changed = True
+
+        if changed:
+            db.commit()
+            return True
+    return False
+
+
 def initiate_global_approval(
     db: Session,
     client_id: int,
