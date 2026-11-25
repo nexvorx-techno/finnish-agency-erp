@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import or_, and_
 from sqlalchemy.orm import Session
 from app.core.database import get_db
+from app.core.site_access import get_allowed_site_ids_for_user, assert_user_can_access_site
 from app.models.client import (
     ClientCompany,
     ClientSite,
@@ -114,9 +115,16 @@ def get_client_company(client_id: int, db: Session = Depends(get_db)):
     return company
 
 @router.get("/{client_id}/sites", response_model=List[ClientSiteOut])
-def get_client_sites(client_id: int, db: Session = Depends(get_db)):
-    sites = db.query(ClientSite).filter(ClientSite.client_id == client_id, ClientSite.is_active == True).all()
-    return sites
+def get_client_sites(
+    client_id: int,
+    user_id: Optional[int] = Query(None),
+    db: Session = Depends(get_db),
+):
+    allowed_ids = get_allowed_site_ids_for_user(db, client_id, user_id, None)
+    q = db.query(ClientSite).filter(ClientSite.client_id == client_id, ClientSite.is_active == True)
+    if allowed_ids is not None:
+        q = q.filter(ClientSite.id.in_(allowed_ids))
+    return q.all()
 
 class SiteCreateRequest(BaseModel):
     site_name: str
@@ -359,46 +367,8 @@ def save_approval_flow(client_id: int, payload: ClientApprovalFlowPayload, db: S
         db.flush()
         flow_record = new_flow
 
-    # Dispatch notifications to each configured approver user
-    dispatched_notifications = []
-    for idx, lvl in enumerate(levels_data):
-        current_level_num = lvl["level"]
-        current_approver_name = lvl.get("approver_name", "Approver")
-        current_approver_id = lvl.get("approver_id")
-
-        # Determine next level approver
-        if idx + 1 < len(levels_data):
-            next_lvl = levels_data[idx + 1]
-            next_level_approver = f"Level {next_lvl['level']}: {next_lvl.get('approver_name', 'Next Approver')}"
-        else:
-            next_level_approver = "None (Final Sign-Off Authorization)"
-
-        notif_title = f"Approval Assignment: {payload.flow_name} ({current_approver_name})"
-        notif_msg = (
-            f"You are assigned to '{payload.flow_name}' as Level {current_level_num} Approver. "
-            f"Next escalation / sign-off step: {next_level_approver}."
-        )
-
-        notif = ClientNotification(
-            client_id=client_id,
-            user_id=current_approver_id,
-            title=notif_title,
-            message=notif_msg,
-            notification_type="APPROVAL_ASSIGNMENT",
-            approval_type=payload.flow_name,
-            approver_level=f"Level {current_level_num}",
-            next_level_approver=next_level_approver,
-            is_read=False,
-            created_at=datetime.utcnow()
-        )
-        db.add(notif)
-        dispatched_notifications.append({
-            "approver_name": current_approver_name,
-            "approval_type": payload.flow_name,
-            "approver_level": f"Level {current_level_num}",
-            "next_level_approver": next_level_approver
-        })
-
+    # Do NOT spam all levels with notifications upon saving configuration!
+    # Notifications are strictly dispatched level-by-level ONLY when an actual request is raised.
     db.commit()
     db.refresh(flow_record)
 
@@ -414,7 +384,7 @@ def save_approval_flow(client_id: int, payload: ClientApprovalFlowPayload, db: S
             "levels": levels_data,
             "updated_at": flow_record.updated_at.isoformat() if flow_record.updated_at else None
         },
-        "notifications_dispatched": dispatched_notifications
+        "notifications_dispatched": []
     }
 
 
@@ -440,7 +410,7 @@ def get_client_notifications(
 ):
     query = db.query(ClientNotification).filter(ClientNotification.client_id == client_id)
     if user_id:
-        query = query.filter((ClientNotification.user_id == user_id) | (ClientNotification.user_id == None))
+        query = query.filter(ClientNotification.user_id == user_id)
     return query.order_by(ClientNotification.created_at.desc()).limit(limit).all()
 
 
@@ -468,10 +438,16 @@ def mark_all_notifications_read(client_id: int, user_id: Optional[int] = None, d
 
 
 @router.get("/{client_id}/deployments", response_model=List[WorkerDeploymentOut])
-def get_client_deployments(client_id: int, site_id: Optional[int] = None, db: Session = Depends(get_db)):
+def get_client_deployments(
+    client_id: int,
+    site_id: Optional[int] = None,
+    user_id: Optional[int] = Query(None),
+    db: Session = Depends(get_db),
+):
+    allowed_ids = get_allowed_site_ids_for_user(db, client_id, user_id, site_id)
     query = db.query(WorkerDeployment).filter(WorkerDeployment.client_id == client_id)
-    if site_id:
-        query = query.filter(WorkerDeployment.site_id == site_id)
+    if allowed_ids is not None:
+        query = query.filter(WorkerDeployment.site_id.in_(allowed_ids))
     deployments = query.all()
     
     # Enrich site_name
@@ -484,23 +460,32 @@ def get_client_deployments(client_id: int, site_id: Optional[int] = None, db: Se
     return results
 
 @router.get("/{client_id}/workforce/live", response_model=LiveWorkforceSummary)
-def get_live_workforce(client_id: int, site_id: Optional[int] = None, db: Session = Depends(get_db)):
+def get_live_workforce(
+    client_id: int,
+    site_id: Optional[int] = None,
+    user_id: Optional[int] = Query(None),
+    db: Session = Depends(get_db),
+):
     company = db.query(ClientCompany).filter(ClientCompany.id == client_id).first()
     if not company:
         raise HTTPException(status_code=404, detail="Client company not found")
 
+    # Resolve strict site scope: all assigned sites for user (for header dropdown),
+    # and active query filter (when a specific assigned site is selected)
+    user_assigned_ids = get_allowed_site_ids_for_user(db, client_id, user_id, None)
+    active_filter_ids = get_allowed_site_ids_for_user(db, client_id, user_id, site_id)
+
     sites_query = db.query(ClientSite).filter(ClientSite.client_id == client_id, ClientSite.is_active == True)
-    if site_id:
-        sites_query = sites_query.filter(ClientSite.id == site_id)
+    if user_assigned_ids is not None:
+        sites_query = sites_query.filter(ClientSite.id.in_(user_assigned_ids))
     sites = sites_query.all()
-    site_ids = [s.id for s in sites]
 
     deployments_query = db.query(WorkerDeployment).filter(
         WorkerDeployment.client_id == client_id,
         WorkerDeployment.status.in_(["ACTIVE", "SICK_LEAVE", "ON_LEAVE"])
     )
-    if site_id:
-        deployments_query = deployments_query.filter(WorkerDeployment.site_id == site_id)
+    if active_filter_ids is not None:
+        deployments_query = deployments_query.filter(WorkerDeployment.site_id.in_(active_filter_ids))
     deployments = deployments_query.all()
 
     today = date.today()
@@ -703,12 +688,14 @@ def supervisor_adjust_hours(request: SupervisorAdjustmentRequest, db: Session = 
 def get_client_shifts(
     client_id: int,
     site_id: Optional[int] = None,
+    user_id: Optional[int] = Query(None),
     shift_date: Optional[date] = None,
     db: Session = Depends(get_db)
 ):
+    allowed_ids = get_allowed_site_ids_for_user(db, client_id, user_id, site_id)
     query = db.query(TimesheetShiftRecord).filter(TimesheetShiftRecord.client_id == client_id)
-    if site_id:
-        query = query.filter(TimesheetShiftRecord.site_id == site_id)
+    if allowed_ids is not None:
+        query = query.filter(TimesheetShiftRecord.site_id.in_(allowed_ids))
     if shift_date:
         query = query.filter(TimesheetShiftRecord.shift_date == shift_date)
     else:

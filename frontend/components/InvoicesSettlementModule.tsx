@@ -35,6 +35,13 @@ export interface InvoiceItem {
   client_status: "PENDING_INTERNAL_APPROVAL" | "RELEASED_TO_ACCOUNTS" | "PAID_SUBMITTED" | "SETTLED" | "DISPUTED";
   current_approval_step: number;
   total_approval_steps: number;
+  current_approver_id?: number | null;
+  current_approver_name?: string | null;
+  approval_levels?: Array<{
+    level: number;
+    approver_id?: number | null;
+    approver_name: string;
+  }>;
   approval_history: Array<{
     step: number;
     action: string;
@@ -62,6 +69,7 @@ export interface InvoiceItem {
 
 interface InvoicesSettlementModuleProps {
   clientId: number;
+  currentUserId?: number;
   companyName: string;
   userName: string;
   userRole?: string;
@@ -74,6 +82,7 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
 
 export const InvoicesSettlementModule: React.FC<InvoicesSettlementModuleProps> = ({
   clientId,
+  currentUserId,
   companyName,
   userName,
   userRole = "CLIENT_ADMIN",
@@ -107,22 +116,41 @@ export const InvoicesSettlementModule: React.FC<InvoicesSettlementModuleProps> =
   const fetchInvoices = useCallback(async () => {
     setIsLoading(true);
     try {
-      const siteQuery = selectedSite && selectedSite !== "all" ? `?site_id=${selectedSite}` : "";
-      const res = await fetch(`${API_BASE}/api/client/${clientId}/invoices${siteQuery}`);
+      const params = new URLSearchParams();
+      if (currentUserId) params.set("user_id", String(currentUserId));
+      if (selectedSite && selectedSite !== "all") params.set("site_id", selectedSite);
+      const qs = params.toString() ? `?${params.toString()}` : "";
+      const res = await fetch(`${API_BASE}/api/client/${clientId}/invoices${qs}`);
       if (res.ok) {
         const data = await res.json();
-        setInvoices(data.invoices || []);
+        const list: InvoiceItem[] = data.invoices || [];
+        setInvoices(list);
+        setSelectedInvoice((prev) =>
+          prev ? list.find((inv) => inv.id === prev.id) || null : null
+        );
       }
     } catch (err) {
       console.error("Error fetching invoices:", err);
     } finally {
       setIsLoading(false);
     }
-  }, [clientId, selectedSite]);
+  }, [clientId, currentUserId, selectedSite]);
 
   useEffect(() => {
     fetchInvoices();
   }, [fetchInvoices]);
+
+  useEffect(() => {
+    const handleJump = (ev: Event) => {
+      const detail = (ev as CustomEvent<{ module?: string; referenceId?: number | null }>).detail;
+      if (detail?.module === "m1.6_invoices" && detail.referenceId) {
+        const found = invoices.find((inv) => inv.id === detail.referenceId);
+        if (found) setSelectedInvoice(found);
+      }
+    };
+    window.addEventListener("open-approval-target", handleJump);
+    return () => window.removeEventListener("open-approval-target", handleJump);
+  }, [invoices]);
 
   // Filtered invoices
   const filteredInvoices = useMemo(() => {
@@ -160,16 +188,19 @@ export const InvoicesSettlementModule: React.FC<InvoicesSettlementModuleProps> =
     };
   }, [invoices]);
 
-  // Handle Manager Internal Approval Decision
+  // Handle Manager Internal Approval Decision (Strict Sequential Level Check)
+  const [approvalError, setApprovalError] = useState("");
   const handleDecisionSubmit = async () => {
     if (!selectedInvoice) return;
     setIsApproving(true);
+    setApprovalError("");
     try {
       const res = await fetch(`${API_BASE}/api/client/invoices/${selectedInvoice.id}/approval-decision`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           decision: pendingAction,
+          approver_user_id: currentUserId,
           approver_name: userName || "Manager",
           approver_role: userRole || "PLANT_MANAGER",
           notes: approvalNotes.trim() || undefined,
@@ -179,23 +210,16 @@ export const InvoicesSettlementModule: React.FC<InvoicesSettlementModuleProps> =
         setIsApprovalModalOpen(false);
         setApprovalNotes("");
         await fetchInvoices();
-        // Update selectedInvoice view
-        setSelectedInvoice((prev) =>
-          prev
-            ? {
-                ...prev,
-                client_status:
-                  pendingAction === "APPROVE"
-                    ? prev.current_approval_step >= prev.total_approval_steps
-                      ? "RELEASED_TO_ACCOUNTS"
-                      : "PENDING_INTERNAL_APPROVAL"
-                    : "DISPUTED",
-              }
-            : null
-        );
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new CustomEvent("refresh-notifications"));
+        }
+      } else {
+        const errBody = await res.json().catch(() => ({}));
+        setApprovalError(errBody.detail || "Sequential approval locked for this level.");
       }
     } catch (err) {
       console.error("Decision submit failed:", err);
+      setApprovalError("Network error while submitting invoice decision.");
     } finally {
       setIsApproving(false);
     }
@@ -705,32 +729,50 @@ export const InvoicesSettlementModule: React.FC<InvoicesSettlementModuleProps> =
 
             {/* ACTION FOOTER BASED ON ROLE & WORKFLOW STATE */}
             <div className="pt-3 border-t border-[var(--border-color)] flex flex-wrap gap-2">
-              {/* Scenario 1: Awaiting Client Internal Approval */}
-              {selectedInvoice.client_status === "PENDING_INTERNAL_APPROVAL" && (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setPendingAction("APPROVE");
-                      setIsApprovalModalOpen(true);
-                    }}
-                    className="flex-1 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold transition-all shadow-xs flex items-center justify-center gap-1.5 cursor-pointer"
-                  >
-                    <Check className="w-4 h-4" />
-                    <span>Approve & Advance</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setPendingAction("REJECT");
-                      setIsApprovalModalOpen(true);
-                    }}
-                    className="px-3 py-2 rounded-xl border border-rose-500/30 text-rose-600 hover:bg-rose-500/10 text-xs font-semibold transition-all cursor-pointer"
-                  >
-                    Dispute
-                  </button>
-                </>
-              )}
+              {/* Scenario 1: Awaiting Client Internal Approval (Strict Sequential Level Lock) */}
+              {selectedInvoice.client_status === "PENDING_INTERNAL_APPROVAL" && (() => {
+                const designatedId = selectedInvoice.current_approver_id;
+                const designatedName =
+                  selectedInvoice.current_approver_name ||
+                  `Level ${selectedInvoice.current_approval_step} Approver`;
+                const canApprove =
+                  designatedId != null ? Number(currentUserId) === Number(designatedId) : true;
+                return canApprove ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setApprovalError("");
+                        setPendingAction("APPROVE");
+                        setIsApprovalModalOpen(true);
+                      }}
+                      className="flex-1 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold transition-all shadow-xs flex items-center justify-center gap-1.5 cursor-pointer"
+                    >
+                      <Check className="w-4 h-4" />
+                      <span>
+                        {selectedInvoice.current_approval_step >= selectedInvoice.total_approval_steps
+                          ? "Approve & Release"
+                          : `Approve Level ${selectedInvoice.current_approval_step}`}
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setApprovalError("");
+                        setPendingAction("REJECT");
+                        setIsApprovalModalOpen(true);
+                      }}
+                      className="px-3 py-2 rounded-xl border border-rose-500/30 text-rose-600 hover:bg-rose-500/10 text-xs font-semibold transition-all cursor-pointer"
+                    >
+                      Dispute
+                    </button>
+                  </>
+                ) : (
+                  <div className="w-full p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-700 dark:text-amber-300 text-xs font-bold text-center">
+                    Locked — Awaiting Level {selectedInvoice.current_approval_step} ({designatedName})
+                  </div>
+                );
+              })()}
 
               {/* Scenario 2: Released to Accounts -> Ready for Bank Payment */}
               {selectedInvoice.client_status === "RELEASED_TO_ACCOUNTS" && (
@@ -806,6 +848,12 @@ export const InvoicesSettlementModule: React.FC<InvoicesSettlementModuleProps> =
                 className="w-full px-3 py-2 rounded-xl bg-[var(--bg-secondary)] border border-[var(--border-color)] text-xs text-[var(--text-primary)]"
               />
             </div>
+
+            {approvalError && (
+              <div className="p-2.5 rounded-xl bg-rose-500/10 border border-rose-500/25 text-rose-600 text-xs font-semibold">
+                {approvalError}
+              </div>
+            )}
 
             <div className="flex items-center justify-end gap-2 pt-2 border-t border-[var(--border-color)]">
               <button

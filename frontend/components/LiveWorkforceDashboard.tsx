@@ -111,7 +111,11 @@ export const LiveWorkforceDashboard: React.FC<LiveWorkforceDashboardProps> = ({
               {summary.client_name} — Workforce Attendance
             </h1>
             <p className="text-xs text-[var(--text-secondary)] mt-1">
-              Live on-site staffing attendance across Tampere & Jyväskylä facilities. Shift hours tracked per Finnish Työaikalaki.
+              Live on-site staffing attendance for{" "}
+              {summary.sites.length > 0
+                ? summary.sites.map((s) => `${s.site_code} (${s.city})`).join(" & ")
+                : "assigned plant facility"}
+              . Shift hours tracked per Finnish Työaikalaki.
             </p>
           </div>
 
@@ -140,7 +144,9 @@ export const LiveWorkforceDashboard: React.FC<LiveWorkforceDashboardProps> = ({
             {summary.total_deployed_headcount}
           </div>
           <div className="text-[11px] text-[var(--text-secondary)] mt-1">
-            Across 2 Finnish facilities
+            {summary.sites.length === 1
+              ? `Assigned to ${summary.sites[0].site_code}`
+              : `Across ${summary.sites.length} assigned facilities`}
           </div>
         </div>
 

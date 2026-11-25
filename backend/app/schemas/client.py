@@ -202,6 +202,8 @@ class ClientNotificationOut(BaseModel):
     approval_type: Optional[str] = None
     approver_level: Optional[str] = None
     next_level_approver: Optional[str] = None
+    target_module: Optional[str] = None
+    reference_id: Optional[int] = None
     is_read: bool
     created_at: datetime
 

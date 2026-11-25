@@ -78,6 +78,7 @@ interface MasterDataModuleProps {
   activeSubTab: MasterSubTab;
   onChangeSubTab: (tab: MasterSubTab) => void;
   sites: SiteItem[];
+  canManageSites?: boolean;
   onRefreshSites?: () => void;
   onNavigateToCreateUser?: () => void;
 }
@@ -90,6 +91,7 @@ export const MasterDataModule: React.FC<MasterDataModuleProps> = ({
   activeSubTab,
   onChangeSubTab,
   sites,
+  canManageSites = true,
   onRefreshSites,
   onNavigateToCreateUser,
 }) => {
@@ -532,16 +534,9 @@ export const MasterDataModule: React.FC<MasterDataModuleProps> = ({
         if (typeof window !== "undefined") {
           window.dispatchEvent(new CustomEvent("refresh-notifications"));
         }
-        if (data.notifications_dispatched && data.notifications_dispatched.length > 0) {
-          setDispatchedNotifsModal({
-            isOpen: true,
-            flowName: flowPayload.flow_name,
-            notifications: data.notifications_dispatched,
-          });
-        }
         setFeedback({
           type: "success",
-          text: `Saved "${flowPayload.flow_name}" approval flow. Notifications dispatched to approver users!`,
+          text: `Saved "${flowPayload.flow_name}" sequential approval workflow. Level 1 will be notified first when requests are raised.`,
         });
       } else {
         setFeedback({ type: "error", text: "Failed to save approval flow changes." });
@@ -804,14 +799,16 @@ export const MasterDataModule: React.FC<MasterDataModuleProps> = ({
                 Locations linked to Finnish TES agreements and biometric attendance terminals.
               </p>
             </div>
-            <button
-              type="button"
-              onClick={openAddSite}
-              className="px-3.5 py-2 rounded-xl bg-[var(--accent-color)] hover:bg-[var(--accent-hover)] text-white text-xs font-bold flex items-center gap-1.5 shadow-sm cursor-pointer"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span>Add Plant Site</span>
-            </button>
+            {canManageSites && (
+              <button
+                type="button"
+                onClick={openAddSite}
+                className="px-3.5 py-2 rounded-xl bg-[var(--accent-color)] hover:bg-[var(--accent-hover)] text-white text-xs font-bold flex items-center gap-1.5 shadow-sm cursor-pointer"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Add Plant Site</span>
+              </button>
+            )}
           </div>
 
           {isSiteFormOpen && (

@@ -4,6 +4,14 @@ from pydantic import BaseModel
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from app.core.database import get_db
+from app.core.site_access import get_allowed_site_ids_for_user, assert_user_can_access_site
+from app.core.approval_engine import (
+    initiate_global_approval,
+    notify_level_1_on_create,
+    execute_sequential_approval_step,
+    get_approval_step_metadata,
+    get_active_flow_levels,
+)
 from app.models.client import (
     ClientSite,
     ClientMasterData,
@@ -108,6 +116,16 @@ def serialize_roster(r: ShiftRosterPlan, db: Session):
             "warnings": warnings,
         })
 
+    is_pending = r.status == "PENDING_INTERNAL_APPROVAL"
+    step_meta = get_approval_step_metadata(
+        db=db,
+        client_id=r.client_id,
+        flow_key="m1.3_builder",
+        current_step=getattr(r, "current_approval_step", 1) or 1,
+        total_steps=getattr(r, "total_approval_steps", 1) or 1,
+        is_pending=is_pending,
+    )
+
     return {
         "id": r.id,
         "client_id": r.client_id,
@@ -120,6 +138,10 @@ def serialize_roster(r: ShiftRosterPlan, db: Session):
         "week_label": r.week_label,
         "department_line": r.department_line,
         "status": r.status,
+        "current_approval_step": step_meta["current_approval_step"],
+        "total_approval_steps": step_meta["total_approval_steps"],
+        "current_approver_id": step_meta["current_approver_id"],
+        "current_approver_name": step_meta["current_approver_name"],
         "total_planned_hours": round(sum(a.weekly_hours for a in allocs), 1),
         "workers_count": len(allocs),
         "created_by": r.created_by,
@@ -131,6 +153,15 @@ def serialize_roster(r: ShiftRosterPlan, db: Session):
 
 def serialize_shift_change(req: ShiftChangeRequest, db: Session):
     site = db.query(ClientSite).filter(ClientSite.id == req.site_id).first()
+    is_pending = req.status in ("PENDING", "PENDING_INTERNAL_APPROVAL")
+    step_meta = get_approval_step_metadata(
+        db=db,
+        client_id=req.client_id,
+        flow_key="m1.3_changes",
+        current_step=getattr(req, "current_approval_step", 1) or 1,
+        total_steps=getattr(req, "total_approval_steps", 1) or 1,
+        is_pending=is_pending,
+    )
     return {
         "id": req.id,
         "client_id": req.client_id,
@@ -146,6 +177,10 @@ def serialize_shift_change(req: ShiftChangeRequest, db: Session):
         "requested_shift": req.requested_shift,
         "reason": req.reason,
         "status": req.status,
+        "current_approval_step": step_meta["current_approval_step"],
+        "total_approval_steps": step_meta["total_approval_steps"],
+        "current_approver_id": step_meta["current_approver_id"],
+        "current_approver_name": step_meta["current_approver_name"],
         "attendance_sync_status": req.attendance_sync_status,
         "fallback_resolution": req.fallback_resolution,
         "reviewed_by": req.reviewed_by,
@@ -291,6 +326,7 @@ class CreateRosterRequest(BaseModel):
     department_line: str
     default_shift: str = "Day Shift (Päivävuoro)"
     copy_from_roster_id: Optional[int] = None
+    created_by_user_id: Optional[int] = None
     created_by: str = "Client Admin"
 
 
@@ -316,6 +352,8 @@ class UpdateAllocationRequest(BaseModel):
 
 class SubmitRosterRequest(BaseModel):
     target_status: str = "SUBMITTED_TO_AGENCY"
+    user_id: Optional[int] = None
+    user_name: Optional[str] = "Client Admin"
 
 
 class ShiftChangeCreateRequest(BaseModel):
@@ -326,11 +364,15 @@ class ShiftChangeCreateRequest(BaseModel):
     current_shift: str
     requested_shift: str
     reason: str
+    created_by_user_id: Optional[int] = None
+    created_by_name: Optional[str] = "Site Supervisor"
 
 
 class ShiftChangeDecisionRequest(BaseModel):
     decision: str  # APPROVE, REJECT, RESOLVE_ABSENT, RESOLVE_OVERTIME, RETRY_SYNC
     reviewed_by: str = "Client Admin"
+    approver_user_id: Optional[int] = None
+    approver_role: Optional[str] = "SITE_MANAGER"
 
 
 # ---------------- ROSTER ENDPOINTS ----------------
@@ -338,18 +380,21 @@ class ShiftChangeDecisionRequest(BaseModel):
 def list_rosters(
     client_id: int,
     site_id: Optional[int] = Query(None),
+    user_id: Optional[int] = Query(None),
     db: Session = Depends(get_db),
 ):
     ensure_default_rosters(client_id, db)
+    allowed_ids = get_allowed_site_ids_for_user(db, client_id, user_id, site_id)
+
     query = db.query(ShiftRosterPlan).filter(ShiftRosterPlan.client_id == client_id)
-    if site_id:
-        query = query.filter(ShiftRosterPlan.site_id == site_id)
+    if allowed_ids is not None:
+        query = query.filter(ShiftRosterPlan.site_id.in_(allowed_ids))
     rosters = query.order_by(ShiftRosterPlan.id.desc()).all()
 
     # Also return available deployed workers for Add Worker modal
     w_query = db.query(WorkerDeployment).filter(WorkerDeployment.client_id == client_id)
-    if site_id:
-        w_query = w_query.filter(WorkerDeployment.site_id == site_id)
+    if allowed_ids is not None:
+        w_query = w_query.filter(WorkerDeployment.site_id.in_(allowed_ids))
     deployed = [
         {
             "worker_id": w.worker_id,
@@ -402,6 +447,7 @@ def create_roster(
     payload: CreateRosterRequest,
     db: Session = Depends(get_db),
 ):
+    assert_user_can_access_site(db, client_id, payload.created_by_user_id, payload.site_id)
     site = db.query(ClientSite).filter(ClientSite.id == payload.site_id).first()
     site_code = site.site_code if site else "SITE"
     try:
@@ -596,14 +642,85 @@ def submit_or_publish_roster(
     if not roster:
         raise HTTPException(status_code=404, detail="Roster plan not found")
 
+    if payload.user_id:
+        assert_user_can_access_site(db, roster.client_id, payload.user_id, roster.site_id)
+
     target = payload.target_status.strip().upper()
     if target not in ("DRAFT", "SUBMITTED_TO_AGENCY", "PUBLISHED"):
         raise HTTPException(status_code=400, detail="Invalid roster status")
 
-    roster.status = target
-    if target == "PUBLISHED":
-        roster.published_at = datetime.utcnow()
+    if target in ("SUBMITTED_TO_AGENCY", "PUBLISHED") and roster.status == "DRAFT":
+        import json as _json
+        init_status, cur_step, tot_steps, hist, levels = initiate_global_approval(
+            db=db,
+            client_id=roster.client_id,
+            flow_key="m1.3_builder",
+            released_status=target,
+            initiator_user_id=payload.user_id,
+            initiator_name=payload.user_name or "Client Admin",
+        )
+        roster.status = init_status
+        roster.current_approval_step = cur_step
+        roster.total_approval_steps = tot_steps
+        roster.approval_history = _json.dumps(hist)
+        if payload.user_id:
+            roster.created_by_user_id = payload.user_id
+        if init_status == "PUBLISHED":
+            roster.published_at = datetime.utcnow()
+        notify_level_1_on_create(
+            db=db,
+            client_id=roster.client_id,
+            flow_key="m1.3_builder",
+            levels=levels,
+            reference_id=roster.id,
+            reference_code=roster.roster_code,
+        )
+    else:
+        roster.status = target
+        if target == "PUBLISHED":
+            roster.published_at = datetime.utcnow()
 
+    db.commit()
+    db.refresh(roster)
+    return serialize_roster(roster, db)
+
+
+@router.post("/rosters/{roster_id}/approval-decision")
+def approve_roster_step(
+    roster_id: int,
+    payload: ShiftChangeDecisionRequest,
+    db: Session = Depends(get_db),
+):
+    roster = db.query(ShiftRosterPlan).filter(ShiftRosterPlan.id == roster_id).first()
+    if not roster:
+        raise HTTPException(status_code=404, detail="Roster plan not found")
+
+    if payload.approver_user_id:
+        assert_user_can_access_site(db, roster.client_id, payload.approver_user_id, roster.site_id)
+
+    new_status, new_step, tot_steps, updated_hist, _ = execute_sequential_approval_step(
+        db=db,
+        client_id=roster.client_id,
+        flow_key="m1.3_builder",
+        current_status=roster.status,
+        current_step=getattr(roster, "current_approval_step", 1) or 1,
+        total_steps=getattr(roster, "total_approval_steps", 1) or 1,
+        history_json=getattr(roster, "approval_history", None),
+        decision=payload.decision,
+        acting_user_id=payload.approver_user_id,
+        acting_user_name=payload.reviewed_by or "Approver",
+        acting_user_role=payload.approver_role or "SITE_MANAGER",
+        notes=None,
+        reference_id=roster.id,
+        reference_code=roster.roster_code,
+        initiator_user_id=getattr(roster, "created_by_user_id", None),
+        released_status="SUBMITTED_TO_AGENCY",
+        rejected_status="DRAFT",
+    )
+    roster.status = new_status
+    roster.current_approval_step = new_step
+    roster.total_approval_steps = tot_steps
+    roster.approval_history = updated_hist
     db.commit()
     db.refresh(roster)
     return serialize_roster(roster, db)
@@ -614,12 +731,14 @@ def submit_or_publish_roster(
 def list_shift_change_requests(
     client_id: int,
     site_id: Optional[int] = Query(None),
+    user_id: Optional[int] = Query(None),
     db: Session = Depends(get_db),
 ):
     ensure_default_rosters(client_id, db)
+    allowed_ids = get_allowed_site_ids_for_user(db, client_id, user_id, site_id)
     q = db.query(ShiftChangeRequest).filter(ShiftChangeRequest.client_id == client_id)
-    if site_id:
-        q = q.filter(ShiftChangeRequest.site_id == site_id)
+    if allowed_ids is not None:
+        q = q.filter(ShiftChangeRequest.site_id.in_(allowed_ids))
     items = q.order_by(ShiftChangeRequest.id.desc()).all()
     return {"client_id": client_id, "requests": [serialize_shift_change(i, db) for i in items]}
 
@@ -630,6 +749,7 @@ def create_shift_change_request(
     payload: ShiftChangeCreateRequest,
     db: Session = Depends(get_db),
 ):
+    assert_user_can_access_site(db, client_id, payload.created_by_user_id, payload.site_id)
     dep = db.query(WorkerDeployment).filter(WorkerDeployment.worker_id == payload.worker_id).first()
     if not dep:
         raise HTTPException(status_code=404, detail="Worker not found")
@@ -639,6 +759,21 @@ def create_shift_change_request(
     except Exception:
         s_date = date.today()
     day_key = DAY_KEYS[s_date.weekday()]
+
+    levels = get_active_flow_levels(db, client_id, "m1.3_changes")
+    if levels:
+        init_status, cur_step, tot_steps, hist, _ = initiate_global_approval(
+            db=db,
+            client_id=client_id,
+            flow_key="m1.3_changes",
+            released_status="PENDING",
+            initiator_user_id=payload.created_by_user_id,
+            initiator_name=payload.created_by_name or "Site Supervisor",
+        )
+    else:
+        init_status, cur_step, tot_steps, hist = "PENDING", 1, 1, []
+
+    import json as _json
 
     req = ShiftChangeRequest(
         client_id=client_id,
@@ -652,14 +787,29 @@ def create_shift_change_request(
         current_shift=payload.current_shift.strip(),
         requested_shift=payload.requested_shift.strip(),
         reason=payload.reason.strip(),
-        status="PENDING",
+        status=init_status,
+        current_approval_step=cur_step,
+        total_approval_steps=tot_steps,
+        approval_history=_json.dumps(hist),
+        created_by_user_id=payload.created_by_user_id,
         attendance_sync_status="PENDING",
     )
     db.add(req)
+    db.flush()
+
+    if levels:
+        notify_level_1_on_create(
+            db=db,
+            client_id=client_id,
+            flow_key="m1.3_changes",
+            levels=levels,
+            reference_id=req.id,
+            reference_code=dep.worker_name,
+        )
+
     db.commit()
     db.refresh(req)
     return serialize_shift_change(req, db)
-
 
 
 @router.post("/shift-change-requests/{req_id}/decision")
@@ -672,7 +822,52 @@ def decide_shift_change_request(
     if not req:
         raise HTTPException(status_code=404, detail="Shift change request not found")
 
+    if payload.approver_user_id:
+        assert_user_can_access_site(db, req.client_id, payload.approver_user_id, req.site_id)
+
     action = payload.decision.strip().upper()
+    levels = get_active_flow_levels(db, req.client_id, "m1.3_changes")
+
+    # If active Master Approval Flow exists for m1.3_changes and action is APPROVE / REJECT,
+    # run strict sequential multi-level approval before executing roster/attendance sync!
+    if levels and action in ("APPROVE", "REJECT") and req.status in ("PENDING", "PENDING_INTERNAL_APPROVAL"):
+        new_status, new_step, tot_steps, updated_hist, is_released = execute_sequential_approval_step(
+            db=db,
+            client_id=req.client_id,
+            flow_key="m1.3_changes",
+            current_status="PENDING_INTERNAL_APPROVAL",
+            current_step=getattr(req, "current_approval_step", 1) or 1,
+            total_steps=getattr(req, "total_approval_steps", len(levels)) or len(levels),
+            history_json=getattr(req, "approval_history", None),
+            decision=action,
+            acting_user_id=payload.approver_user_id,
+            acting_user_name=payload.reviewed_by or "Approver",
+            acting_user_role=payload.approver_role or "SITE_MANAGER",
+            notes=None,
+            reference_id=req.id,
+            reference_code=req.worker_name,
+            initiator_user_id=getattr(req, "created_by_user_id", None),
+            released_status="APPROVED",
+            rejected_status="REJECTED",
+        )
+        req.current_approval_step = new_step
+        req.total_approval_steps = tot_steps
+        req.approval_history = updated_hist
+        if action == "APPROVE" and not is_released:
+            req.status = "PENDING_INTERNAL_APPROVAL"
+            req.reviewed_by = payload.reviewed_by
+            req.reviewed_at = datetime.utcnow()
+            db.commit()
+            db.refresh(req)
+            return serialize_shift_change(req, db)
+        elif action == "REJECT":
+            req.status = "REJECTED"
+            req.reviewed_by = payload.reviewed_by
+            req.reviewed_at = datetime.utcnow()
+            db.commit()
+            db.refresh(req)
+            return serialize_shift_change(req, db)
+
     req.reviewed_by = payload.reviewed_by
     req.reviewed_at = datetime.utcnow()
 
@@ -895,11 +1090,14 @@ def get_monthly_shift_calendar(
     year: int = Query(...),
     month: int = Query(...),
     site_id: Optional[int] = Query(None),
+    user_id: Optional[int] = Query(None),
     worker_id: Optional[int] = Query(None),
     db: Session = Depends(get_db),
 ):
     ensure_default_rosters(client_id, db)
     ensure_default_monthly_shifts(client_id, year, month, db)
+
+    allowed_ids = get_allowed_site_ids_for_user(db, client_id, user_id, site_id)
 
     first_day = date(year, month, 1)
     next_month = date(year + 1, 1, 1) if month == 12 else date(year, month + 1, 1)
@@ -910,16 +1108,16 @@ def get_monthly_shift_calendar(
         WorkerDailyShift.shift_date >= first_day,
         WorkerDailyShift.shift_date <= last_day,
     )
-    if site_id:
-        q = q.filter(WorkerDailyShift.site_id == site_id)
+    if allowed_ids is not None:
+        q = q.filter(WorkerDailyShift.site_id.in_(allowed_ids))
     if worker_id:
         q = q.filter(WorkerDailyShift.worker_id == worker_id)
 
     rows = q.order_by(WorkerDailyShift.shift_date.asc(), WorkerDailyShift.worker_id.asc()).all()
 
     w_q = db.query(WorkerDeployment).filter(WorkerDeployment.client_id == client_id)
-    if site_id:
-        w_q = w_q.filter(WorkerDeployment.site_id == site_id)
+    if allowed_ids is not None:
+        w_q = w_q.filter(WorkerDeployment.site_id.in_(allowed_ids))
     deployed = [
         {
             "worker_id": w.worker_id,

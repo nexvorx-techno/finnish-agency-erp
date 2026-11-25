@@ -5,10 +5,18 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from app.core.database import get_db
+from app.core.site_access import get_allowed_site_ids_for_user, assert_user_can_access_site
+from app.core.approval_engine import (
+    initiate_global_approval,
+    notify_level_1_on_create,
+    execute_sequential_approval_step,
+    get_approval_step_metadata,
+)
 from app.models.talent import JobRequisition, CandidateShortlist, InterviewSlot, RelocationMilestone
-from app.models.client import ClientSite, ClientApprovalFlow, ClientNotification
+from app.models.client import ClientSite
 
 router = APIRouter(prefix="/api/client", tags=["Client Talent Acquisition"])
+
 
 # Pydantic Schemas
 class RequisitionCreateSchema(BaseModel):
@@ -26,12 +34,14 @@ class RequisitionCreateSchema(BaseModel):
     created_by_user_id: Optional[int] = None
     created_by_name: Optional[str] = "Client User"
 
+
 class RequisitionApprovalDecisionSchema(BaseModel):
     decision: str  # "APPROVE" or "REJECT"
     approver_user_id: Optional[int] = None
-    approver_name: Optional[str] = "Site Manager"
+    approver_name: Optional[str] = "Approver"
     approver_role: Optional[str] = "SITE_MANAGER"
     notes: Optional[str] = None
+
 
 class InterviewScheduleSchema(BaseModel):
     shortlist_id: int
@@ -40,120 +50,118 @@ class InterviewScheduleSchema(BaseModel):
     scheduled_at: str  # ISO string or YYYY-MM-DD HH:MM
     interviewer_name: str
     meeting_link: Optional[str] = "https://meet.google.com/suomi-staff-interview"
+    user_id: Optional[int] = None
+
 
 class InterviewFeedbackSchema(BaseModel):
     slot_id: int
     client_rating: int
     client_feedback: str
     decision: str  # RECOMMEND_HIRE, DECLINE, SECOND_ROUND
+    user_id: Optional[int] = None
+
+
+def serialize_requisition(r: JobRequisition, db: Session) -> dict:
+    site = db.query(ClientSite).filter(ClientSite.id == r.site_id).first()
+    candidates_count = (
+        db.query(CandidateShortlist)
+        .filter(CandidateShortlist.requisition_id == r.id)
+        .count()
+    )
+
+    try:
+        history = json.loads(r.approval_history) if r.approval_history else []
+    except Exception:
+        history = []
+
+    is_pending = r.status == "PENDING_INTERNAL_APPROVAL"
+    step_meta = get_approval_step_metadata(
+        db=db,
+        client_id=r.client_id,
+        flow_key="m1.2_req",
+        current_step=getattr(r, "current_approval_step", 1) or 1,
+        total_steps=getattr(r, "total_approval_steps", 1) or 1,
+        is_pending=is_pending,
+    )
+
+    return {
+        "id": r.id,
+        "req_code": r.req_code,
+        "client_id": r.client_id,
+        "site_id": r.site_id,
+        "site_name": site.site_name if site else "Main Plant",
+        "site_code": site.site_code if site else "TMP-01",
+        "role_title": r.role_title,
+        "tes_category": r.tes_category,
+        "vacancies_count": r.vacancies_count,
+        "fulfilled_count": r.fulfilled_count,
+        "experience_years_required": r.experience_years_required,
+        "required_certifications": r.required_certifications,
+        "shift_pattern": r.shift_pattern,
+        "salary_range_eur_hr": r.salary_range_eur_hr,
+        "start_date": r.start_date.isoformat() if r.start_date else None,
+        "notes": r.notes,
+        "status": r.status,
+        "current_approval_step": step_meta["current_approval_step"],
+        "total_approval_steps": step_meta["total_approval_steps"],
+        "current_approver_id": step_meta["current_approver_id"],
+        "current_approver_name": step_meta["current_approver_name"],
+        "current_approver_role": step_meta["current_approver_role"],
+        "approval_levels": step_meta["approval_levels"],
+        "approval_history": history,
+        "released_to_agency_at": r.released_to_agency_at.isoformat()
+        if getattr(r, "released_to_agency_at", None)
+        else None,
+        "created_by_user_id": getattr(r, "created_by_user_id", None),
+        "created_by_name": getattr(r, "created_by_name", "Client User") or "Client User",
+        "candidates_count": candidates_count,
+        "created_at": r.created_at.isoformat() if r.created_at else None,
+    }
 
 
 @router.get("/{client_id}/requisitions")
 def list_requisitions(
     client_id: int,
     site_id: Optional[int] = Query(None),
-    db: Session = Depends(get_db)
+    user_id: Optional[int] = Query(None),
+    db: Session = Depends(get_db),
 ):
+    allowed_ids = get_allowed_site_ids_for_user(db, client_id, user_id, site_id)
+
     query = db.query(JobRequisition).filter(JobRequisition.client_id == client_id)
-    if site_id:
-        query = query.filter(JobRequisition.site_id == site_id)
-    
+    if allowed_ids is not None:
+        query = query.filter(JobRequisition.site_id.in_(allowed_ids))
+
     reqs = query.order_by(JobRequisition.created_at.desc()).all()
-    
-    results = []
-    for r in reqs:
-        site = db.query(ClientSite).filter(ClientSite.id == r.site_id).first()
-        candidates_count = db.query(CandidateShortlist).filter(CandidateShortlist.requisition_id == r.id).count()
-
-        try:
-            history = json.loads(r.approval_history) if r.approval_history else []
-        except Exception:
-            history = []
-
-        results.append({
-            "id": r.id,
-            "req_code": r.req_code,
-            "client_id": r.client_id,
-            "site_id": r.site_id,
-            "site_name": site.site_name if site else "Main Plant",
-            "site_code": site.site_code if site else "TMP-01",
-            "role_title": r.role_title,
-            "tes_category": r.tes_category,
-            "vacancies_count": r.vacancies_count,
-            "fulfilled_count": r.fulfilled_count,
-            "experience_years_required": r.experience_years_required,
-            "required_certifications": r.required_certifications,
-            "shift_pattern": r.shift_pattern,
-            "salary_range_eur_hr": r.salary_range_eur_hr,
-            "start_date": r.start_date.isoformat() if r.start_date else None,
-            "notes": r.notes,
-            "status": r.status,
-            "current_approval_step": getattr(r, "current_approval_step", 1) or 1,
-            "total_approval_steps": getattr(r, "total_approval_steps", 1) or 1,
-            "approval_history": history,
-            "released_to_agency_at": r.released_to_agency_at.isoformat() if getattr(r, "released_to_agency_at", None) else None,
-            "created_by_name": getattr(r, "created_by_name", "Client User") or "Client User",
-            "candidates_count": candidates_count,
-            "created_at": r.created_at.isoformat() if r.created_at else None
-        })
+    results = [serialize_requisition(r, db) for r in reqs]
     return {"client_id": client_id, "requisitions": results}
 
 
 @router.post("/requisitions/create")
 def create_requisition(payload: RequisitionCreateSchema, db: Session = Depends(get_db)):
-    # Generate unique req_code
+    # Strictly verify creator can operate on target site
+    assert_user_can_access_site(db, payload.client_id, payload.created_by_user_id, payload.site_id)
+
     count = db.query(JobRequisition).count() + 1
     req_code = f"REQ-2026-{count:03d}"
-    
+    while db.query(JobRequisition).filter(JobRequisition.req_code == req_code).first():
+        count += 1
+        req_code = f"REQ-2026-{count:03d}"
+
     try:
         parsed_start_date = datetime.strptime(payload.start_date, "%Y-%m-%d").date()
     except Exception:
         parsed_start_date = date.today()
 
-    # Check if ClientApprovalFlow is configured for "m1.2_req"
-    approval_flow = db.query(ClientApprovalFlow).filter(
-        ClientApprovalFlow.client_id == payload.client_id,
-        ClientApprovalFlow.flow_key == "m1.2_req",
-        ClientApprovalFlow.is_active == True,
-    ).first()
-
-    levels = []
-    if approval_flow and approval_flow.levels_json:
-        try:
-            levels = json.loads(approval_flow.levels_json)
-        except Exception:
-            levels = []
-
-    now_iso = datetime.utcnow().isoformat()
-    if levels and len(levels) > 0:
-        initial_status = "PENDING_INTERNAL_APPROVAL"
-        total_steps = len(levels)
-        history = [
-            {
-                "step": 0,
-                "action": "CREATED",
-                "approver_name": payload.created_by_name or "Client User",
-                "role": "INITIATOR",
-                "timestamp": now_iso,
-                "notes": "Worker requirement submitted for internal approvals",
-            }
-        ]
-        released_at = None
-    else:
-        # If no internal approval steps configured, release directly to agency
-        initial_status = "RELEASED_TO_AGENCY"
-        total_steps = 1
-        history = [
-            {
-                "step": 1,
-                "action": "AUTO_RELEASED",
-                "approver_name": payload.created_by_name or "Client Admin",
-                "role": "CLIENT_ADMIN",
-                "timestamp": now_iso,
-                "notes": "Requirement auto-released to Agency Portal",
-            }
-        ]
-        released_at = datetime.utcnow()
+    initial_status, current_step, total_steps, history, levels = initiate_global_approval(
+        db=db,
+        client_id=payload.client_id,
+        flow_key="m1.2_req",
+        released_status="RELEASED_TO_AGENCY",
+        initiator_user_id=payload.created_by_user_id,
+        initiator_name=payload.created_by_name or "Client User",
+    )
+    released_at = datetime.utcnow() if initial_status == "RELEASED_TO_AGENCY" else None
 
     new_req = JobRequisition(
         req_code=req_code,
@@ -170,202 +178,152 @@ def create_requisition(payload: RequisitionCreateSchema, db: Session = Depends(g
         start_date=parsed_start_date,
         notes=payload.notes,
         status=initial_status,
-        current_approval_step=1,
+        current_approval_step=current_step,
         total_approval_steps=total_steps,
         approval_history=json.dumps(history),
         released_to_agency_at=released_at,
         created_by_user_id=payload.created_by_user_id,
         created_by_name=payload.created_by_name or "Client User",
-        created_at=datetime.utcnow()
+        created_at=datetime.utcnow(),
     )
     db.add(new_req)
+    db.flush()
+
+    # Notify STRICTLY Level 1 Approver ONLY (Level 2+ notified only after Level 1 approves!)
+    notify_level_1_on_create(
+        db=db,
+        client_id=payload.client_id,
+        flow_key="m1.2_req",
+        levels=levels,
+        reference_id=new_req.id,
+        reference_code=req_code,
+    )
+
     db.commit()
     db.refresh(new_req)
-
-    # If internal approval is required, dispatch notification to designated Step 1 Approver
-    if levels and len(levels) > 0:
-        first_level = levels[0]
-        approver_id = first_level.get("approver_id")
-        approver_name = first_level.get("approver_name") or "Approver"
-        notif = ClientNotification(
-            client_id=payload.client_id,
-            user_id=approver_id,
-            title=f"Approval Required: {payload.role_title} ({req_code})",
-            message=f"Job Requisition {req_code} for {payload.vacancies_count}x {payload.role_title} submitted by {payload.created_by_name or 'Client User'} requires your Level 1 sign-off before release to Agency.",
-            notification_type="APPROVAL_ASSIGNMENT",
-            approval_type="Job Requisitions Approval",
-            approver_level=f"Level 1 (of {total_steps})",
-            next_level_approver=approver_name,
-            is_read=False,
-            created_at=datetime.utcnow()
-        )
-        db.add(notif)
-        db.commit()
-
-    return {"message": "Requisition created successfully", "requisition": new_req}
+    return {
+        "message": "Requisition created successfully",
+        "requisition": serialize_requisition(new_req, db),
+    }
 
 
 @router.post("/requisitions/{req_id}/approval-decision")
 def approve_requisition_step(
     req_id: int,
     payload: RequisitionApprovalDecisionSchema,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     req = db.query(JobRequisition).filter(JobRequisition.id == req_id).first()
     if not req:
         raise HTTPException(status_code=404, detail="Requisition not found")
 
-    try:
-        history = json.loads(req.approval_history) if req.approval_history else []
-    except Exception:
-        history = []
+    # Enforce site access if approver is restricted to specific site(s)
+    assert_user_can_access_site(db, req.client_id, payload.approver_user_id, req.site_id)
 
-    decision = payload.decision.strip().upper()
-    now_iso = datetime.utcnow().isoformat()
+    new_status, new_step, total_steps, updated_history, is_released = execute_sequential_approval_step(
+        db=db,
+        client_id=req.client_id,
+        flow_key="m1.2_req",
+        current_status=req.status,
+        current_step=req.current_approval_step or 1,
+        total_steps=req.total_approval_steps or 1,
+        history_json=req.approval_history,
+        decision=payload.decision,
+        acting_user_id=payload.approver_user_id,
+        acting_user_name=payload.approver_name or "Approver",
+        acting_user_role=payload.approver_role or "SITE_MANAGER",
+        notes=payload.notes,
+        reference_id=req.id,
+        reference_code=req.req_code,
+        initiator_user_id=req.created_by_user_id,
+        released_status="RELEASED_TO_AGENCY",
+        rejected_status="REJECTED_INTERNAL",
+    )
 
-    if decision == "APPROVE":
-        history.append({
-            "step": req.current_approval_step,
-            "action": "APPROVED",
-            "approver_id": payload.approver_user_id,
-            "approver_name": payload.approver_name or "Approver",
-            "role": payload.approver_role or "SITE_MANAGER",
-            "timestamp": now_iso,
-            "notes": payload.notes or "Approved",
-        })
-        if req.current_approval_step < req.total_approval_steps:
-            req.current_approval_step += 1
-            # Status stays PENDING_INTERNAL_APPROVAL
-            # Notify next level approver if configured
-            approval_flow = db.query(ClientApprovalFlow).filter(
-                ClientApprovalFlow.client_id == req.client_id,
-                ClientApprovalFlow.flow_key == "m1.2_req",
-                ClientApprovalFlow.is_active == True,
-            ).first()
-            if approval_flow and approval_flow.levels_json:
-                try:
-                    levels = json.loads(approval_flow.levels_json)
-                    if len(levels) >= req.current_approval_step:
-                        next_lvl = levels[req.current_approval_step - 1]
-                        notif = ClientNotification(
-                            client_id=req.client_id,
-                            user_id=next_lvl.get("approver_id"),
-                            title=f"Approval Required: {req.role_title} ({req.req_code})",
-                            message=f"Job Requisition {req.req_code} requires your Level {req.current_approval_step} authorization.",
-                            notification_type="APPROVAL_ASSIGNMENT",
-                            approval_type="Job Requisitions Approval",
-                            approver_level=f"Level {req.current_approval_step} (of {req.total_approval_steps})",
-                            next_level_approver=next_lvl.get("approver_name") or "Approver",
-                            is_read=False,
-                            created_at=datetime.utcnow()
-                        )
-                        db.add(notif)
-                except Exception:
-                    pass
-        else:
-            # All client internal approvals released! Requisition crosses to Agency Portal
-            req.status = "RELEASED_TO_AGENCY"
-            req.released_to_agency_at = datetime.utcnow()
-            # Notify requisition creator that requisition is now released to agency
-            notif = ClientNotification(
-                client_id=req.client_id,
-                user_id=req.created_by_user_id,
-                title=f"Requirement Released to Agency: {req.role_title} ({req.req_code})",
-                message=f"All internal approvals completed. Requisition {req.req_code} is now actively released to Agency Portal for candidate sourcing.",
-                notification_type="APPROVAL_ASSIGNMENT",
-                approval_type="Job Requisitions Approval",
-                approver_level="Approved & Released",
-                next_level_approver="Agency Talent Procurement",
-                is_read=False,
-                created_at=datetime.utcnow()
-            )
-            db.add(notif)
-    elif decision == "REJECT":
-        history.append({
-            "step": req.current_approval_step,
-            "action": "REJECTED",
-            "approver_id": payload.approver_user_id,
-            "approver_name": payload.approver_name or "Approver",
-            "role": payload.approver_role or "SITE_MANAGER",
-            "timestamp": now_iso,
-            "notes": payload.notes or "Rejected in internal review",
-        })
-        req.status = "REJECTED_INTERNAL"
-        # Notify requisition creator of rejection
-        notif = ClientNotification(
-            client_id=req.client_id,
-            user_id=req.created_by_user_id,
-            title=f"Requirement Rejected: {req.role_title} ({req.req_code})",
-            message=f"Job Requisition {req.req_code} was rejected during internal review by {payload.approver_name or 'Approver'}.",
-            notification_type="APPROVAL_ASSIGNMENT",
-            approval_type="Job Requisitions Approval",
-            approver_level="Rejected",
-            next_level_approver="None",
-            is_read=False,
-            created_at=datetime.utcnow()
-        )
-        db.add(notif)
-    else:
-        raise HTTPException(status_code=400, detail="Invalid decision. Allowed: APPROVE, REJECT")
+    req.status = new_status
+    req.current_approval_step = new_step
+    req.total_approval_steps = total_steps
+    req.approval_history = updated_history
+    if is_released:
+        req.released_to_agency_at = datetime.utcnow()
 
-    req.approval_history = json.dumps(history)
     db.commit()
     db.refresh(req)
     return {
-        "message": f"Requisition {decision} recorded",
+        "message": f"Requisition {payload.decision.strip().upper()} recorded",
         "status": req.status,
         "current_approval_step": req.current_approval_step,
-        "total_approval_steps": req.total_approval_steps
+        "total_approval_steps": req.total_approval_steps,
+        "requisition": serialize_requisition(req, db),
     }
 
 
 @router.get("/requisitions/{req_id}/candidates")
-def get_shortlisted_candidates(req_id: int, db: Session = Depends(get_db)):
+def get_shortlisted_candidates(
+    req_id: int,
+    user_id: Optional[int] = Query(None),
+    db: Session = Depends(get_db),
+):
+    req = db.query(JobRequisition).filter(JobRequisition.id == req_id).first()
+    if req and user_id:
+        assert_user_can_access_site(db, req.client_id, user_id, req.site_id)
+
     candidates = db.query(CandidateShortlist).filter(CandidateShortlist.requisition_id == req_id).all()
     results = []
     for c in candidates:
         interviews = db.query(InterviewSlot).filter(InterviewSlot.shortlist_id == c.id).all()
-        results.append({
-            "id": c.id,
-            "requisition_id": c.requisition_id,
-            "candidate_id": c.candidate_id,
-            "full_name": c.full_name,
-            "current_location": c.current_location,
-            "nationality": c.nationality,
-            "experience_years": c.experience_years,
-            "match_percentage": c.match_percentage,
-            "tes_grade": c.tes_grade,
-            "certifications": c.certifications,
-            "language_skills": c.language_skills,
-            "status": c.status,
-            "summary": c.summary,
-            "interviews": [
-                {
-                    "id": i.id,
-                    "scheduled_at": i.scheduled_at.isoformat(),
-                    "meeting_link": i.meeting_link,
-                    "interviewer_name": i.interviewer_name,
-                    "status": i.status,
-                    "client_rating": i.client_rating,
-                    "client_feedback": i.client_feedback,
-                    "decision": i.decision
-                } for i in interviews
-            ]
-        })
+        results.append(
+            {
+                "id": c.id,
+                "requisition_id": c.requisition_id,
+                "candidate_id": c.candidate_id,
+                "full_name": c.full_name,
+                "current_location": c.current_location,
+                "nationality": c.nationality,
+                "experience_years": c.experience_years,
+                "match_percentage": c.match_percentage,
+                "tes_grade": c.tes_grade,
+                "certifications": c.certifications,
+                "language_skills": c.language_skills,
+                "status": c.status,
+                "summary": c.summary,
+                "interviews": [
+                    {
+                        "id": i.id,
+                        "scheduled_at": i.scheduled_at.isoformat(),
+                        "meeting_link": i.meeting_link,
+                        "interviewer_name": i.interviewer_name,
+                        "status": i.status,
+                        "client_rating": i.client_rating,
+                        "client_feedback": i.client_feedback,
+                        "decision": i.decision,
+                    }
+                    for i in interviews
+                ],
+            }
+        )
     return {"requisition_id": req_id, "candidates": results}
 
 
 @router.get("/{client_id}/interviews")
-def list_client_interviews(client_id: int, db: Session = Depends(get_db)):
-    # Join CandidateShortlist and JobRequisition to filter by client_id
-    interviews = (
+def list_client_interviews(
+    client_id: int,
+    site_id: Optional[int] = Query(None),
+    user_id: Optional[int] = Query(None),
+    db: Session = Depends(get_db),
+):
+    allowed_ids = get_allowed_site_ids_for_user(db, client_id, user_id, site_id)
+
+    q = (
         db.query(InterviewSlot)
         .join(CandidateShortlist, InterviewSlot.shortlist_id == CandidateShortlist.id)
         .join(JobRequisition, CandidateShortlist.requisition_id == JobRequisition.id)
         .filter(JobRequisition.client_id == client_id)
-        .order_by(InterviewSlot.scheduled_at.asc())
-        .all()
     )
+    if allowed_ids is not None:
+        q = q.filter(JobRequisition.site_id.in_(allowed_ids))
+
+    interviews = q.order_by(InterviewSlot.scheduled_at.asc()).all()
     return [
         {
             "id": i.id,
@@ -378,13 +336,20 @@ def list_client_interviews(client_id: int, db: Session = Depends(get_db)):
             "status": i.status,
             "client_rating": i.client_rating,
             "client_feedback": i.client_feedback,
-            "decision": i.decision
-        } for i in interviews
+            "decision": i.decision,
+        }
+        for i in interviews
     ]
 
 
 @router.post("/interviews/schedule")
 def schedule_interview(payload: InterviewScheduleSchema, db: Session = Depends(get_db)):
+    candidate = db.query(CandidateShortlist).filter(CandidateShortlist.id == payload.shortlist_id).first()
+    if candidate and payload.user_id:
+        req = db.query(JobRequisition).filter(JobRequisition.id == candidate.requisition_id).first()
+        if req:
+            assert_user_can_access_site(db, req.client_id, payload.user_id, req.site_id)
+
     try:
         dt = datetime.fromisoformat(payload.scheduled_at)
     except Exception:
@@ -398,15 +363,13 @@ def schedule_interview(payload: InterviewScheduleSchema, db: Session = Depends(g
         meeting_link=payload.meeting_link or "https://meet.google.com/suomi-staff-interview",
         interviewer_name=payload.interviewer_name,
         status="SCHEDULED",
-        decision="PENDING"
+        decision="PENDING",
     )
     db.add(slot)
-    
-    # Update candidate status
-    candidate = db.query(CandidateShortlist).filter(CandidateShortlist.id == payload.shortlist_id).first()
+
     if candidate:
         candidate.status = "INTERVIEW_SCHEDULED"
-    
+
     db.commit()
     db.refresh(slot)
     return {"message": "Interview booked successfully", "slot": slot}
@@ -418,17 +381,20 @@ def submit_interview_feedback(slot_id: int, payload: InterviewFeedbackSchema, db
     if not slot:
         raise HTTPException(status_code=404, detail="Interview slot not found")
 
+    candidate = db.query(CandidateShortlist).filter(CandidateShortlist.id == slot.shortlist_id).first()
+    if candidate and payload.user_id:
+        req = db.query(JobRequisition).filter(JobRequisition.id == candidate.requisition_id).first()
+        if req:
+            assert_user_can_access_site(db, req.client_id, payload.user_id, req.site_id)
+
     slot.client_rating = payload.client_rating
     slot.client_feedback = payload.client_feedback
     slot.decision = payload.decision
     slot.status = "COMPLETED"
 
-    # If hired, update candidate status
-    candidate = db.query(CandidateShortlist).filter(CandidateShortlist.id == slot.shortlist_id).first()
     if candidate:
         if payload.decision == "RECOMMEND_HIRE":
             candidate.status = "OFFER_ACCEPTED"
-            # Update requisition fulfilled count
             req = db.query(JobRequisition).filter(JobRequisition.id == candidate.requisition_id).first()
             if req:
                 req.fulfilled_count = min(req.vacancies_count, req.fulfilled_count + 1)
@@ -444,8 +410,28 @@ def submit_interview_feedback(slot_id: int, payload: InterviewFeedbackSchema, db
 
 
 @router.get("/{client_id}/relocation-tracker")
-def list_relocation_milestones(client_id: int, db: Session = Depends(get_db)):
+def list_relocation_milestones(
+    client_id: int,
+    site_id: Optional[int] = Query(None),
+    user_id: Optional[int] = Query(None),
+    db: Session = Depends(get_db),
+):
+    allowed_ids = get_allowed_site_ids_for_user(db, client_id, user_id, site_id)
+    allowed_cities: Optional[List[str]] = None
+    if allowed_ids is not None:
+        sites = (
+            db.query(ClientSite)
+            .filter(ClientSite.client_id == client_id, ClientSite.id.in_(allowed_ids))
+            .all()
+        )
+        allowed_cities = [s.city.strip().lower() for s in sites if s.city]
+
     milestones = db.query(RelocationMilestone).order_by(RelocationMilestone.target_arrival_date.asc()).all()
+    if allowed_cities is not None:
+        milestones = [
+            m for m in milestones if (m.destination_city or "").strip().lower() in allowed_cities
+        ]
+
     return [
         {
             "id": m.id,
@@ -461,6 +447,7 @@ def list_relocation_milestones(client_id: int, db: Session = Depends(get_db)):
             "housing_arranged": m.housing_arranged,
             "target_arrival_date": m.target_arrival_date.isoformat(),
             "plant_start_date": m.plant_start_date.isoformat(),
-            "current_phase": m.current_phase
-        } for m in milestones
+            "current_phase": m.current_phase,
+        }
+        for m in milestones
     ]

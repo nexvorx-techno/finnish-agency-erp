@@ -171,9 +171,11 @@ class ClientNotification(Base):
     title = Column(String(200), nullable=False)
     message = Column(Text, nullable=False)
     notification_type = Column(String(50), default="APPROVAL_FLOW")
-    approval_type = Column(String(100), nullable=True)  # e.g. "Invoice"
+    approval_type = Column(String(100), nullable=True)  # e.g. "m1.2_req"
     approver_level = Column(String(50), nullable=True)  # e.g. "Level 1"
     next_level_approver = Column(String(200), nullable=True)  # e.g. "Client Admin"
+    target_module = Column(String(100), nullable=True)  # Direct navigation module key e.g. "m1.2_req"
+    reference_id = Column(Integer, nullable=True)       # Specific record ID
     is_read = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 
@@ -201,6 +203,7 @@ class ClientInvoice(Base):
     current_approval_step = Column(Integer, default=1)
     total_approval_steps = Column(Integer, default=1)
     approval_history = Column(Text, nullable=True)
+    created_by_user_id = Column(Integer, nullable=True)
     items_breakdown_json = Column(Text, nullable=True)
     notes = Column(Text, nullable=True)
     payment_date = Column(Date, nullable=True)
@@ -231,7 +234,11 @@ class WorkerActionRequest(Base):
     rating = Column(Integer, nullable=True)  # 1-5 stars
     reason = Column(Text, nullable=False)
     effective_date = Column(Date, nullable=True)
-    status = Column(String(50), default="PENDING_AGENCY")  # PENDING_AGENCY, IN_REVIEW, ACTIONED, RESOLVED, CANCELLED
+    status = Column(String(50), default="PENDING_AGENCY")  # PENDING_INTERNAL_APPROVAL, PENDING_AGENCY, IN_REVIEW, ACTIONED, RESOLVED, REJECTED_INTERNAL, CANCELLED
+    current_approval_step = Column(Integer, default=1)
+    total_approval_steps = Column(Integer, default=1)
+    approval_history = Column(Text, nullable=True)
+    created_by_user_id = Column(Integer, nullable=True)
     agency_feedback = Column(Text, nullable=True)
     created_by_name = Column(String(255), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -258,7 +265,11 @@ class SafetyIncidentLog(Base):
     description = Column(Text, nullable=False)
     immediate_action_taken = Column(Text, nullable=False)
     preventative_recommendation = Column(Text, nullable=True)
-    status = Column(String(50), default="REPORTED")  # REPORTED, AGENCY_INVESTIGATING, CORRECTIVE_ACTION_ISSUED, CLOSED
+    status = Column(String(50), default="REPORTED")  # PENDING_INTERNAL_APPROVAL, REPORTED, AGENCY_INVESTIGATING, CORRECTIVE_ACTION_ISSUED, CLOSED, REJECTED_INTERNAL
+    current_approval_step = Column(Integer, default=1)
+    total_approval_steps = Column(Integer, default=1)
+    approval_history = Column(Text, nullable=True)
+    created_by_user_id = Column(Integer, nullable=True)
     reported_by_name = Column(String(255), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 

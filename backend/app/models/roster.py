@@ -14,8 +14,12 @@ class ShiftRosterPlan(Base):
     start_date = Column(Date, nullable=True)  # Monday of the roster week
     week_label = Column(String(120), nullable=False)
     department_line = Column(String(150), nullable=False)
-    status = Column(String(40), default="DRAFT")  # DRAFT, SUBMITTED_TO_AGENCY, PUBLISHED
+    status = Column(String(40), default="DRAFT")  # DRAFT, PENDING_INTERNAL_APPROVAL, SUBMITTED_TO_AGENCY, PUBLISHED, REJECTED_INTERNAL
     total_planned_hours = Column(Float, default=0.0)
+    current_approval_step = Column(Integer, default=1)
+    total_approval_steps = Column(Integer, default=1)
+    approval_history = Column(Text, nullable=True)
+    created_by_user_id = Column(Integer, nullable=True)
     created_by = Column(String(150), default="Client Admin")
     created_at = Column(DateTime, default=datetime.utcnow)
     published_at = Column(DateTime, nullable=True)
@@ -65,9 +69,13 @@ class ShiftChangeRequest(Base):
     current_shift = Column(String(120), nullable=False)
     requested_shift = Column(String(120), nullable=False)
     reason = Column(Text, nullable=False)
-    status = Column(String(30), default="PENDING")  # PENDING, APPROVED, REJECTED
+    status = Column(String(30), default="PENDING")  # PENDING, PENDING_INTERNAL_APPROVAL, APPROVED, REJECTED
     attendance_sync_status = Column(String(30), default="PENDING")  # PENDING, SYNCED, SYNC_FAILED
     fallback_resolution = Column(String(40), default="NONE")  # NONE, MARKED_ABSENT, TREATED_AS_OVERTIME
+    current_approval_step = Column(Integer, default=1)
+    total_approval_steps = Column(Integer, default=1)
+    approval_history = Column(Text, nullable=True)
+    created_by_user_id = Column(Integer, nullable=True)
     reviewed_by = Column(String(150), nullable=True)
     reviewed_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)

@@ -338,15 +338,16 @@ export default function ClientPortalPage() {
     } catch {}
   }, []);
 
-  // Fetch live workforce from FastAPI backend
+  // Fetch live workforce from FastAPI backend (strictly scoped by currentUser.userId & selectedSite)
   const fetchWorkforceData = useCallback(async () => {
     if (!currentUser) return;
     setIsSyncing(true);
     try {
-      const url =
-        selectedSite === "all"
-          ? `${API_BASE}/api/client/${currentUser.clientId}/workforce/live`
-          : `${API_BASE}/api/client/${currentUser.clientId}/workforce/live?site_id=${selectedSite}`;
+      const params = new URLSearchParams({ user_id: String(currentUser.userId) });
+      if (selectedSite !== "all") {
+        params.set("site_id", selectedSite);
+      }
+      const url = `${API_BASE}/api/client/${currentUser.clientId}/workforce/live?${params.toString()}`;
       const res = await fetch(url);
       if (res.ok) {
         const data = await res.json();
@@ -364,6 +365,79 @@ export default function ClientPortalPage() {
       fetchWorkforceData();
     }
   }, [fetchWorkforceData, currentUser]);
+
+  // Synchronize fresh DB site assignments & permissions immediately after login (covers PIN login too!)
+  useEffect(() => {
+    if (!currentUser?.clientId || !currentUser?.userId) return;
+    let cancelled = false;
+    const syncFreshUserScope = async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/client/${currentUser.clientId}/users`);
+        if (!res.ok || cancelled) return;
+        const data = await res.json();
+        const dbUser = (data.users || []).find(
+          (u: { id: number }) => u.id === currentUser.userId
+        );
+        if (!dbUser || cancelled) return;
+
+        const freshSites = (dbUser.assigned_site_ids || "*").trim();
+        const freshPerms = dbUser.module_permissions || "{}";
+        const freshRole = dbUser.role;
+
+        setCurrentUser((prev) => {
+          if (!prev) return null;
+          if (
+            freshSites === (prev.assigned_site_ids || "*").trim() &&
+            freshPerms === (prev.modulePermissions || "{}") &&
+            (!freshRole || freshRole === prev.role)
+          ) {
+            return prev;
+          }
+          return {
+            ...prev,
+            userId: dbUser.id,
+            assigned_site_ids: freshSites,
+            modulePermissions: freshPerms,
+            role: freshRole || prev.role,
+          };
+        });
+        try {
+          const rawPin = localStorage.getItem("suomistaff_client_pin");
+          if (rawPin) {
+            const parsedPin = JSON.parse(rawPin);
+            if (parsedPin && (parsedPin.userId === dbUser.id || parsedPin.userEmail === dbUser.email)) {
+              parsedPin.assigned_site_ids = freshSites;
+              parsedPin.modulePermissions = freshPerms;
+              if (freshRole) parsedPin.role = freshRole;
+              localStorage.setItem("suomistaff_client_pin", JSON.stringify(parsedPin));
+            }
+          }
+        } catch {}
+      } catch {}
+    };
+    syncFreshUserScope();
+    return () => {
+      cancelled = true;
+    };
+  }, [currentUser?.clientId, currentUser?.userId]);
+
+  // Strictly lock `selectedSite` whenever a user is restricted to specific site(s)
+  useEffect(() => {
+    if (!currentUser) return;
+    const raw = (currentUser.assigned_site_ids || "*").trim();
+    const allAccess = raw === "*" || raw.toLowerCase() === "all";
+    if (!allAccess) {
+      const ids = raw
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
+      if (ids.length === 1 && selectedSite !== ids[0]) {
+        setSelectedSite(ids[0]);
+      } else if (ids.length > 1 && selectedSite !== "all" && !ids.includes(selectedSite)) {
+        setSelectedSite(ids[0]);
+      }
+    }
+  }, [currentUser, selectedSite]);
 
   // Login Handler
   const handleLoginSuccess = (userData: CurrentUser) => {
@@ -673,16 +747,23 @@ export default function ClientPortalPage() {
     );
   }
 
-  // Compute sites accessible to this logged-in user (RBAC site scoping)
+  // Compute sites accessible to this logged-in user (Strict RBAC site scoping)
   const assignedRaw = (currentUser.assigned_site_ids || "*").trim();
-  const isAllSitesUser = assignedRaw === "*" || assignedRaw.toLowerCase() === "all" || assignedRaw === "";
+  const isAllSitesUser = assignedRaw === "*" || assignedRaw.toLowerCase() === "all";
   const allowedSiteIds = isAllSitesUser
     ? null
-    : assignedRaw.split(",").map((id) => id.trim());
+    : assignedRaw
+        .split(",")
+        .map((id) => id.trim())
+        .filter(Boolean);
   const allowedSites = isAllSitesUser
     ? summary.sites
     : summary.sites.filter((s) => allowedSiteIds?.includes(s.id.toString()));
   const canSwitchSite = allowedSites.length > 1;
+  const effectiveSelectedSite =
+    !isAllSitesUser && allowedSiteIds && allowedSiteIds.length === 1
+      ? allowedSiteIds[0]
+      : selectedSite;
 
   // 2. IF AUTHENTICATED: Display the Full 3-Pane Client Portal Workspace
   return (
@@ -755,7 +836,7 @@ export default function ClientPortalPage() {
           onToggleMobileMenu={() => setIsMobileMenuOpen((prev) => !prev)}
           activeTab={activeTab}
           setActiveTab={setActiveTab}
-          selectedSite={selectedSite}
+          selectedSite={effectiveSelectedSite}
           setSelectedSite={handleSiteChange}
           sites={allowedSites}
           canSwitchSite={canSwitchSite}
@@ -783,14 +864,16 @@ export default function ClientPortalPage() {
           {activeModule === "dashboard" ? (
             <ClientDashboard
               clientId={currentUser.clientId}
+              currentUserId={currentUser.userId}
               companyName={summary.client_name}
               userName={currentUser.fullName}
-              selectedSite={selectedSite}
+              selectedSite={effectiveSelectedSite}
+              allowedSites={allowedSites}
               summary={summary}
               onNavigateToAttendance={() => navigateToModule("m1.1_live")}
               onNavigateToRequisitions={() => navigateToModule("m1.2_req")}
               onNavigateToInvoices={() => navigateToModule("m1.6_invoices")}
-              onNavigateToApprovals={(modId) => navigateToModule(modId || "m1.4_overtime")}
+              onNavigateToApprovals={(modId) => navigateToModule(modId || "m1.2_req")}
             />
           ) : activeModule === "messaging" ? (
             <LinkedInMessagingPage
@@ -802,6 +885,9 @@ export default function ClientPortalPage() {
           ) : activeModule.startsWith("m1.2") ? (
             <TalentAcquisitionModule
               clientId={currentUser.clientId}
+              currentUserId={currentUser.userId}
+              userRole={currentUser.role}
+              allowedSites={allowedSites}
               selectedSubTab={
                 activeModule === "m1.2_shortlist"
                   ? "m1.2_shortlist"
@@ -812,16 +898,18 @@ export default function ClientPortalPage() {
                   : "m1.2_req"
               }
               onChangeSubTab={(tab) => navigateToModule(tab)}
-              selectedSite={selectedSite}
+              selectedSite={effectiveSelectedSite}
               userName={currentUser.fullName}
             />
           ) : activeModule.startsWith("m1.3") ? (
             <ShiftPlanningModule
               clientId={currentUser.clientId}
+              currentUserId={currentUser.userId}
+              userRole={currentUser.role}
               companyName={summary.client_name}
               userName={currentUser.fullName}
-              selectedSite={selectedSite}
-              sites={allowedSites.length > 0 ? allowedSites : summary.sites}
+              selectedSite={effectiveSelectedSite}
+              sites={allowedSites}
               activeSubTab={
                 activeModule === "m1.3_assignments" ||
                 activeModule === "m1.3_changes" ||
@@ -844,7 +932,8 @@ export default function ClientPortalPage() {
                   : "m1.8_site_master"
               }
               onChangeSubTab={(tab) => navigateToModule(tab)}
-              sites={summary.sites}
+              sites={allowedSites}
+              canManageSites={isAllSitesUser}
               onRefreshSites={fetchWorkforceData}
               onNavigateToCreateUser={() => navigateToModule("m1.9_create_user")}
             />
@@ -853,7 +942,7 @@ export default function ClientPortalPage() {
               clientId={currentUser.clientId}
               companyName={summary.client_name}
               currentUserRole={currentUser.role}
-              sites={summary.sites}
+              sites={allowedSites}
               activeSubTab={
                 activeModule === "m1.9_create_user"
                   ? ("m1.9_create_user" as UserMgmtSubTab)
@@ -864,10 +953,11 @@ export default function ClientPortalPage() {
           ) : activeModule.startsWith("m1.6") ? (
             <InvoicesSettlementModule
               clientId={currentUser.clientId}
+              currentUserId={currentUser.userId}
               companyName={summary.client_name}
               userName={currentUser.fullName}
               userRole={currentUser.role}
-              selectedSite={selectedSite}
+              selectedSite={effectiveSelectedSite}
               activeSubTab={
                 activeModule === "m1.6_payments"
                   ? "m1.6_payments"
@@ -880,11 +970,12 @@ export default function ClientPortalPage() {
           ) : activeModule.startsWith("m1.5") ? (
             <WorkerOperationsModule
               clientId={currentUser.clientId}
+              currentUserId={currentUser.userId}
               companyName={summary.client_name}
               userName={currentUser.fullName}
               userRole={currentUser.role}
-              selectedSite={selectedSite}
-              sites={summary.sites}
+              selectedSite={effectiveSelectedSite}
+              sites={allowedSites}
               activeSubTab={
                 activeModule === "m1.5_safety"
                   ? "m1.5_safety"
@@ -894,8 +985,8 @@ export default function ClientPortalPage() {
             />
           ) : activeModule === "m1.1_live" || activeModule === "m1.1" ? (
             <LiveWorkforceDashboard
-              summary={summary}
-              selectedSite={selectedSite}
+              summary={{ ...summary, sites: allowedSites }}
+              selectedSite={effectiveSelectedSite}
               setSelectedSite={handleSiteChange}
               onSimulatePunch={handleSimulatePunch}
               onOpenAdjustment={handleOpenAdjustment}

@@ -58,6 +58,10 @@ export interface WorkerActionRequestItem {
   reason: string;
   effective_date?: string | null;
   status: string;
+  current_approval_step?: number;
+  total_approval_steps?: number;
+  current_approver_id?: number | null;
+  current_approver_name?: string | null;
   agency_feedback?: string | null;
   created_by_name?: string | null;
   created_at: string;
@@ -79,13 +83,18 @@ export interface SafetyIncidentItem {
   description: string;
   immediate_action_taken: string;
   preventative_recommendation?: string | null;
-  status: "REPORTED" | "AGENCY_INVESTIGATING" | "CORRECTIVE_ACTION_ISSUED" | "CLOSED";
+  status: string;
+  current_approval_step?: number;
+  total_approval_steps?: number;
+  current_approver_id?: number | null;
+  current_approver_name?: string | null;
   reported_by_name?: string | null;
   created_at: string;
 }
 
 interface WorkerOperationsModuleProps {
   clientId: number;
+  currentUserId?: number;
   companyName: string;
   userName: string;
   userRole?: string;
@@ -99,8 +108,10 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
 
 export const WorkerOperationsModule: React.FC<WorkerOperationsModuleProps> = ({
   clientId,
+  currentUserId,
   companyName,
   userName,
+  userRole = "SITE_MANAGER",
   selectedSite = "all",
   sites = [],
   activeSubTab = "m1.5_actions",
@@ -145,12 +156,15 @@ export const WorkerOperationsModule: React.FC<WorkerOperationsModuleProps> = ({
   // Selected Incident Detail Viewer
   const [viewingIncident, setViewingIncident] = useState<SafetyIncidentItem | null>(null);
 
-  // 1. Fetch Workers
+  // 1. Fetch Workers (strictly site-scoped)
   const fetchWorkers = useCallback(async () => {
     setIsLoading(true);
     try {
-      const siteQuery = selectedSite && selectedSite !== "all" ? `?site_id=${selectedSite}` : "";
-      const res = await fetch(`${API_BASE}/api/client/${clientId}/operations/workers${siteQuery}`);
+      const params = new URLSearchParams();
+      if (currentUserId) params.set("user_id", String(currentUserId));
+      if (selectedSite && selectedSite !== "all") params.set("site_id", selectedSite);
+      const qs = params.toString() ? `?${params.toString()}` : "";
+      const res = await fetch(`${API_BASE}/api/client/${clientId}/operations/workers${qs}`);
       if (res.ok) {
         const data = await res.json();
         setWorkers(data.workers || []);
@@ -160,12 +174,16 @@ export const WorkerOperationsModule: React.FC<WorkerOperationsModuleProps> = ({
     } finally {
       setIsLoading(false);
     }
-  }, [clientId, selectedSite]);
+  }, [clientId, currentUserId, selectedSite]);
 
-  // 2. Fetch Actions
+  // 2. Fetch Actions (strictly site-scoped)
   const fetchActionRequests = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/client/${clientId}/operations/action-requests`);
+      const params = new URLSearchParams();
+      if (currentUserId) params.set("user_id", String(currentUserId));
+      if (selectedSite && selectedSite !== "all") params.set("site_id", selectedSite);
+      const qs = params.toString() ? `?${params.toString()}` : "";
+      const res = await fetch(`${API_BASE}/api/client/${clientId}/operations/action-requests${qs}`);
       if (res.ok) {
         const data = await res.json();
         setActionRequests(data.action_requests || []);
@@ -173,13 +191,16 @@ export const WorkerOperationsModule: React.FC<WorkerOperationsModuleProps> = ({
     } catch (err) {
       console.error("Error fetching action requests:", err);
     }
-  }, [clientId]);
+  }, [clientId, currentUserId, selectedSite]);
 
-  // 3. Fetch Incidents
+  // 3. Fetch Incidents (strictly site-scoped)
   const fetchIncidents = useCallback(async () => {
     try {
-      const siteQuery = selectedSite && selectedSite !== "all" ? `?site_id=${selectedSite}` : "";
-      const res = await fetch(`${API_BASE}/api/client/${clientId}/operations/incidents${siteQuery}`);
+      const params = new URLSearchParams();
+      if (currentUserId) params.set("user_id", String(currentUserId));
+      if (selectedSite && selectedSite !== "all") params.set("site_id", selectedSite);
+      const qs = params.toString() ? `?${params.toString()}` : "";
+      const res = await fetch(`${API_BASE}/api/client/${clientId}/operations/incidents${qs}`);
       if (res.ok) {
         const data = await res.json();
         setIncidents(data.incidents || []);
@@ -187,7 +208,7 @@ export const WorkerOperationsModule: React.FC<WorkerOperationsModuleProps> = ({
     } catch (err) {
       console.error("Error fetching safety incidents:", err);
     }
-  }, [clientId, selectedSite]);
+  }, [clientId, currentUserId, selectedSite]);
 
   useEffect(() => {
     fetchWorkers();
@@ -227,6 +248,7 @@ export const WorkerOperationsModule: React.FC<WorkerOperationsModuleProps> = ({
         rating: actionTypeModal === "PERFORMANCE_FEEDBACK" ? feedbackRating : undefined,
         reason: actionReason.trim(),
         effective_date: new Date().toISOString().split("T")[0],
+        created_by_user_id: currentUserId,
         created_by_name: userName || "Site Supervisor",
       };
 
@@ -242,6 +264,9 @@ export const WorkerOperationsModule: React.FC<WorkerOperationsModuleProps> = ({
         setActionReason("");
         await fetchWorkers();
         await fetchActionRequests();
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new CustomEvent("refresh-notifications"));
+        }
       }
     } catch (err) {
       console.error("Submit worker action error:", err);
@@ -267,6 +292,7 @@ export const WorkerOperationsModule: React.FC<WorkerOperationsModuleProps> = ({
         description: incidentForm.description.trim(),
         immediate_action_taken: incidentForm.immediate_action_taken.trim(),
         preventative_recommendation: incidentForm.preventative_recommendation.trim() || undefined,
+        created_by_user_id: currentUserId,
         reported_by_name: userName || "Safety Officer",
       };
 
@@ -291,6 +317,9 @@ export const WorkerOperationsModule: React.FC<WorkerOperationsModuleProps> = ({
           preventative_recommendation: "",
         });
         await fetchIncidents();
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new CustomEvent("refresh-notifications"));
+        }
       }
     } catch (err) {
       console.error("Submit safety incident error:", err);
@@ -597,29 +626,98 @@ export const WorkerOperationsModule: React.FC<WorkerOperationsModuleProps> = ({
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-[var(--border-color)]">
-                    {actionRequests.map((a) => (
-                      <tr key={a.id} className="hover:bg-[var(--bg-secondary)]/50 transition-colors">
-                        <td className="py-2.5 px-3 font-semibold text-[var(--text-primary)]">
-                          {a.worker_name}
-                          <div className="text-[10px] text-[var(--text-secondary)] font-normal">{a.role_title}</div>
-                        </td>
-                        <td className="py-2.5 px-3">
-                          <span className="font-bold text-blue-600">{a.action_type.replace(/_/g, " ")}</span>
-                        </td>
-                        <td className="py-2.5 px-3 text-[var(--text-secondary)]">
-                          {a.target_site_name ? `→ ${a.target_site_name}` : a.urgency || "Standard"}
-                        </td>
-                        <td className="py-2.5 px-3 max-w-xs truncate text-[var(--text-primary)]">{a.reason}</td>
-                        <td className="py-2.5 px-3">
-                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/10 text-amber-600 border border-amber-500/20">
-                            {a.status}
-                          </span>
-                        </td>
-                        <td className="py-2.5 px-3 text-[10px] text-[var(--text-secondary)]">
-                          {new Date(a.created_at).toLocaleDateString("fi-FI")}
-                        </td>
-                      </tr>
-                    ))}
+                    {actionRequests.map((a) => {
+                      const isPendingApproval = a.status === "PENDING_INTERNAL_APPROVAL";
+                      const canApprove =
+                        isPendingApproval &&
+                        (a.current_approver_id != null
+                          ? Number(currentUserId) === Number(a.current_approver_id)
+                          : true);
+                      return (
+                        <tr key={a.id} className="hover:bg-[var(--bg-secondary)]/50 transition-colors">
+                          <td className="py-2.5 px-3 font-semibold text-[var(--text-primary)]">
+                            {a.worker_name}
+                            <div className="text-[10px] text-[var(--text-secondary)] font-normal">{a.role_title}</div>
+                          </td>
+                          <td className="py-2.5 px-3">
+                            <span className="font-bold text-blue-600">{a.action_type.replace(/_/g, " ")}</span>
+                          </td>
+                          <td className="py-2.5 px-3 text-[var(--text-secondary)]">
+                            {a.target_site_name ? `→ ${a.target_site_name}` : a.urgency || "Standard"}
+                          </td>
+                          <td className="py-2.5 px-3 max-w-xs truncate text-[var(--text-primary)]">{a.reason}</td>
+                          <td className="py-2.5 px-3">
+                            {isPendingApproval ? (
+                              canApprove ? (
+                                <div className="flex items-center gap-1.5">
+                                  <button
+                                    type="button"
+                                    onClick={async () => {
+                                      const res = await fetch(
+                                        `${API_BASE}/api/client/operations/action-requests/${a.id}/approval-decision`,
+                                        {
+                                          method: "POST",
+                                          headers: { "Content-Type": "application/json" },
+                                          body: JSON.stringify({
+                                            decision: "APPROVE",
+                                            approver_user_id: currentUserId,
+                                            approver_name: userName,
+                                            approver_role: userRole,
+                                          }),
+                                        }
+                                      );
+                                      if (res.ok) {
+                                        await fetchActionRequests();
+                                        window.dispatchEvent(new CustomEvent("refresh-notifications"));
+                                      }
+                                    }}
+                                    className="px-2 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-bold cursor-pointer"
+                                  >
+                                    Approve L{a.current_approval_step || 1}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={async () => {
+                                      const res = await fetch(
+                                        `${API_BASE}/api/client/operations/action-requests/${a.id}/approval-decision`,
+                                        {
+                                          method: "POST",
+                                          headers: { "Content-Type": "application/json" },
+                                          body: JSON.stringify({
+                                            decision: "REJECT",
+                                            approver_user_id: currentUserId,
+                                            approver_name: userName,
+                                            approver_role: userRole,
+                                          }),
+                                        }
+                                      );
+                                      if (res.ok) {
+                                        await fetchActionRequests();
+                                        window.dispatchEvent(new CustomEvent("refresh-notifications"));
+                                      }
+                                    }}
+                                    className="px-2 py-1 rounded-lg border border-rose-500/30 text-rose-600 text-[10px] font-semibold cursor-pointer"
+                                  >
+                                    Reject
+                                  </button>
+                                </div>
+                              ) : (
+                                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/10 text-amber-600 border border-amber-500/20">
+                                  Locked — L{a.current_approval_step || 1} ({a.current_approver_name || "Approver"})
+                                </span>
+                              )
+                            ) : (
+                              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/10 text-amber-600 border border-amber-500/20">
+                                {a.status}
+                              </span>
+                            )}
+                          </td>
+                          <td className="py-2.5 px-3 text-[10px] text-[var(--text-secondary)]">
+                            {new Date(a.created_at).toLocaleDateString("fi-FI")}
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>

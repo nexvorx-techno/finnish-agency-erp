@@ -66,7 +66,11 @@ interface RosterItem {
   week_dates: WeekDateItem[];
   week_label: string;
   department_line: string;
-  status: "DRAFT" | "SUBMITTED_TO_AGENCY" | "PUBLISHED";
+  status: "DRAFT" | "PENDING_INTERNAL_APPROVAL" | "SUBMITTED_TO_AGENCY" | "PUBLISHED";
+  current_approval_step?: number;
+  total_approval_steps?: number;
+  current_approver_id?: number | null;
+  current_approver_name?: string | null;
   total_planned_hours: number;
   workers_count: number;
   created_by: string;
@@ -104,6 +108,10 @@ interface ShiftChangeItem {
   requested_shift: string;
   reason: string;
   status: string;
+  current_approval_step?: number;
+  total_approval_steps?: number;
+  current_approver_id?: number | null;
+  current_approver_name?: string | null;
   attendance_sync_status: string;
   fallback_resolution: string;
   reviewed_by: string | null;
@@ -111,6 +119,8 @@ interface ShiftChangeItem {
 
 interface ShiftPlanningModuleProps {
   clientId: number;
+  currentUserId?: number;
+  userRole?: string;
   companyName: string;
   userName: string;
   selectedSite: string;
@@ -216,6 +226,8 @@ function getShiftBadgeStyle(shift: string) {
 
 export const ShiftPlanningModule: React.FC<ShiftPlanningModuleProps> = ({
   clientId,
+  currentUserId,
+  userRole = "SITE_MANAGER",
   companyName,
   userName,
   selectedSite,
@@ -285,18 +297,24 @@ export const ShiftPlanningModule: React.FC<ShiftPlanningModuleProps> = ({
   });
 
   useEffect(() => {
-    if (selectedSite !== "all") {
+    if (sites.length === 1) {
+      const onlyId = sites[0].id.toString();
+      if (activeSiteId !== onlyId) setActiveSiteId(onlyId);
+    } else if (selectedSite !== "all") {
       setActiveSiteId(selectedSite);
     }
-  }, [selectedSite]);
+  }, [selectedSite, sites, activeSiteId]);
 
   const fetchData = useCallback(async () => {
     setIsLoading(true);
     try {
-      const siteQuery = activeSiteId !== "all" ? `?site_id=${activeSiteId}` : "";
+      const params = new URLSearchParams();
+      if (currentUserId) params.set("user_id", String(currentUserId));
+      if (activeSiteId !== "all") params.set("site_id", activeSiteId);
+      const qs = params.toString() ? `?${params.toString()}` : "";
       const [rRes, cRes] = await Promise.all([
-        fetch(`${API_BASE}/api/client/${clientId}/rosters${siteQuery}`),
-        fetch(`${API_BASE}/api/client/${clientId}/shift-change-requests${siteQuery}`),
+        fetch(`${API_BASE}/api/client/${clientId}/rosters${qs}`),
+        fetch(`${API_BASE}/api/client/${clientId}/shift-change-requests${qs}`),
       ]);
       if (rRes.ok) {
         const data = await rRes.json();
@@ -320,7 +338,7 @@ export const ShiftPlanningModule: React.FC<ShiftPlanningModuleProps> = ({
     } finally {
       setIsLoading(false);
     }
-  }, [clientId, activeSiteId]);
+  }, [clientId, currentUserId, activeSiteId]);
 
   useEffect(() => {
     fetchData();
@@ -583,13 +601,22 @@ export const ShiftPlanningModule: React.FC<ShiftPlanningModuleProps> = ({
       const res = await fetch(`${API_BASE}/api/client/rosters/${currentRoster.id}/submit`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ target_status: targetStatus }),
+        body: JSON.stringify({
+          target_status: targetStatus,
+          user_id: currentUserId,
+          user_name: userName || "Client Admin",
+        }),
       });
       if (res.ok) {
         const updated: RosterItem = await res.json();
         setRosters((prev) => prev.map((r) => (r.id === updated.id ? updated : r)));
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new CustomEvent("refresh-notifications"));
+        }
         setNotice(
-          targetStatus === "SUBMITTED_TO_AGENCY"
+          updated.status === "PENDING_INTERNAL_APPROVAL"
+            ? `${updated.week_label} schedule submitted for Level 1 internal approval.`
+            : targetStatus === "SUBMITTED_TO_AGENCY"
             ? `${updated.week_label} schedule submitted to Agency for operational verification.`
             : `${updated.week_label} schedule published live! Workers and Agency notified.`
         );
@@ -605,13 +632,25 @@ export const ShiftPlanningModule: React.FC<ShiftPlanningModuleProps> = ({
       const res = await fetch(`${API_BASE}/api/client/shift-change-requests/${reqId}/decision`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ decision, reviewed_by: userName || "Client Admin" }),
+        body: JSON.stringify({
+          decision,
+          reviewed_by: userName || "Client Admin",
+          approver_user_id: currentUserId,
+          approver_role: userRole,
+        }),
       });
       if (res.ok) {
         const updated: ShiftChangeItem = await res.json();
         setChangeRequests((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new CustomEvent("refresh-notifications"));
+        }
         if (decision === "APPROVE" || decision === "RETRY_SYNC") {
-          setNotice(`Approved shift change for ${updated.worker_name} — Calendar & ERP Attendance Register synced.`);
+          setNotice(
+            updated.status === "PENDING_INTERNAL_APPROVAL"
+              ? `Level ${(updated.current_approval_step || 2) - 1} approved — forwarded to Level ${updated.current_approval_step} approver.`
+              : `Approved shift change for ${updated.worker_name} — Calendar & ERP Attendance Register synced.`
+          );
           await fetchData();
         } else if (decision === "REJECT") {
           setNotice(`Rejected shift change for ${updated.worker_name}.`);
@@ -640,6 +679,8 @@ export const ShiftPlanningModule: React.FC<ShiftPlanningModuleProps> = ({
           current_shift: changeCurrentShift,
           requested_shift: changeRequestedShift,
           reason: changeReason.trim(),
+          created_by_user_id: currentUserId,
+          created_by_name: userName || "Site Supervisor",
         }),
       });
       if (res.ok) {
@@ -647,6 +688,9 @@ export const ShiftPlanningModule: React.FC<ShiftPlanningModuleProps> = ({
         setChangeRequests((prev) => [created, ...prev]);
         setIsLogChangeOpen(false);
         setChangeReason("");
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new CustomEvent("refresh-notifications"));
+        }
         setNotice(`Logged shift change request for ${created.worker_name}.`);
       }
     } catch {}
@@ -1367,23 +1411,32 @@ export const ShiftPlanningModule: React.FC<ShiftPlanningModuleProps> = ({
                           </span>
                         </td>
                         <td className="py-3 px-4 text-right">
-                          {req.status === "PENDING" ? (
-                            <div className="flex items-center justify-end gap-1.5">
-                              <button
-                                type="button"
-                                onClick={() => handleShiftChangeDecision(req.id, "APPROVE")}
-                                className="px-2.5 py-1 rounded bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-semibold cursor-pointer shadow-2xs"
-                              >
-                                Approve & Sync
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => handleShiftChangeDecision(req.id, "REJECT")}
-                                className="px-2.5 py-1 rounded border border-rose-200 dark:border-rose-900 text-rose-600 hover:bg-rose-50 text-[11px] font-semibold cursor-pointer"
-                              >
-                                Reject
-                              </button>
-                            </div>
+                          {req.status === "PENDING" || req.status === "PENDING_INTERNAL_APPROVAL" ? (
+                            req.current_approver_id != null &&
+                            Number(currentUserId) !== Number(req.current_approver_id) ? (
+                              <span className="px-2.5 py-1 rounded bg-amber-500/10 border border-amber-500/25 text-amber-700 dark:text-amber-300 text-[11px] font-bold">
+                                Locked — L{req.current_approval_step || 1} ({req.current_approver_name || "Approver"})
+                              </span>
+                            ) : (
+                              <div className="flex items-center justify-end gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => handleShiftChangeDecision(req.id, "APPROVE")}
+                                  className="px-2.5 py-1 rounded bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-semibold cursor-pointer shadow-2xs"
+                                >
+                                  {req.current_approver_id != null
+                                    ? `Approve L${req.current_approval_step || 1}`
+                                    : "Approve & Sync"}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleShiftChangeDecision(req.id, "REJECT")}
+                                  className="px-2.5 py-1 rounded border border-rose-200 dark:border-rose-900 text-rose-600 hover:bg-rose-50 text-[11px] font-semibold cursor-pointer"
+                                >
+                                  Reject
+                                </button>
+                              </div>
+                            )
                           ) : (
                             <span className="text-[11px] text-[var(--text-secondary)]">
                               Reviewed by {req.reviewed_by || "Admin"}

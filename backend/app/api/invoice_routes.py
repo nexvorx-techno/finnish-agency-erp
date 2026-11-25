@@ -5,6 +5,11 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from app.core.database import get_db
+from app.core.site_access import get_allowed_site_ids_for_user, assert_user_can_access_site
+from app.core.approval_engine import (
+    execute_sequential_approval_step,
+    get_approval_step_metadata,
+)
 from app.models.client import ClientInvoice, ClientCompany, ClientSite, ClientApprovalFlow
 
 router = APIRouter(prefix="/api/client", tags=["Client Invoices & Settlement"])
@@ -42,26 +47,27 @@ class InvoiceCreateDemoSchema(BaseModel):
 def list_client_invoices(
     client_id: int,
     site_id: Optional[int] = Query(None),
+    user_id: Optional[int] = Query(None),
     status: Optional[str] = Query(None),
     db: Session = Depends(get_db)
 ):
     """
-    Returns all agency invoices for this client portal.
-    If database is currently empty, seeds 3 realistic Finnish statutory ALV 25.5%
-    demonstration invoices across different workflow states.
+    Returns agency invoices strictly scoped to the user's assigned plant site(s).
     """
+    # Ensure demo invoices exist once for the client before applying site filter
+    total_client_invoices = db.query(ClientInvoice).filter(ClientInvoice.client_id == client_id).count()
+    if total_client_invoices == 0:
+        seed_invoices_for_client(client_id, db)
+
+    allowed_ids = get_allowed_site_ids_for_user(db, client_id, user_id, site_id)
+
     query = db.query(ClientInvoice).filter(ClientInvoice.client_id == client_id)
-    if site_id:
-        query = query.filter(ClientInvoice.site_id == site_id)
+    if allowed_ids is not None:
+        query = query.filter(ClientInvoice.site_id.in_(allowed_ids))
     if status:
         query = query.filter(ClientInvoice.client_status == status)
 
     invoices = query.order_by(ClientInvoice.id.desc()).all()
-
-    # If no invoices exist yet for this client, seed realistic production invoices
-    if len(invoices) == 0:
-        seed_invoices_for_client(client_id, db)
-        invoices = query.order_by(ClientInvoice.id.desc()).all()
 
     results = []
     for inv in invoices:
@@ -76,6 +82,16 @@ def list_client_invoices(
             items = json.loads(inv.items_breakdown_json) if inv.items_breakdown_json else []
         except Exception:
             items = []
+
+        is_pending = inv.client_status == "PENDING_INTERNAL_APPROVAL"
+        step_meta = get_approval_step_metadata(
+            db=db,
+            client_id=inv.client_id,
+            flow_key="m1.6_invoices",
+            current_step=inv.current_approval_step or 1,
+            total_steps=inv.total_approval_steps or 1,
+            is_pending=is_pending,
+        )
 
         results.append({
             "id": inv.id,
@@ -96,8 +112,12 @@ def list_client_invoices(
             "currency": inv.currency,
             "agency_approval_status": inv.agency_approval_status,
             "client_status": inv.client_status,
-            "current_approval_step": inv.current_approval_step,
-            "total_approval_steps": inv.total_approval_steps,
+            "current_approval_step": step_meta["current_approval_step"],
+            "total_approval_steps": step_meta["total_approval_steps"],
+            "current_approver_id": step_meta["current_approver_id"],
+            "current_approver_name": step_meta["current_approver_name"],
+            "current_approver_role": step_meta["current_approver_role"],
+            "approval_levels": step_meta["approval_levels"],
             "approval_history": history,
             "items_breakdown": items,
             "notes": inv.notes,
@@ -124,55 +144,44 @@ def approve_invoice_step(
     db: Session = Depends(get_db)
 ):
     """
-    Client internal manager approval flow.
+    Client internal manager sequential approval flow (global engine).
     When all internal steps approve, status advances to RELEASED_TO_ACCOUNTS.
     """
     inv = db.query(ClientInvoice).filter(ClientInvoice.id == invoice_id).first()
     if not inv:
         raise HTTPException(status_code=404, detail="Invoice not found")
 
-    try:
-        history = json.loads(inv.approval_history) if inv.approval_history else []
-    except Exception:
-        history = []
+    if inv.site_id and payload.approver_user_id:
+        assert_user_can_access_site(db, inv.client_id, payload.approver_user_id, inv.site_id)
 
-    decision = payload.decision.strip().upper()
-    now_iso = datetime.utcnow().isoformat()
+    new_status, new_step, total_steps, updated_history, _ = execute_sequential_approval_step(
+        db=db,
+        client_id=inv.client_id,
+        flow_key="m1.6_invoices",
+        current_status=inv.client_status,
+        current_step=inv.current_approval_step or 1,
+        total_steps=inv.total_approval_steps or 1,
+        history_json=inv.approval_history,
+        decision=payload.decision,
+        acting_user_id=payload.approver_user_id,
+        acting_user_name=payload.approver_name or "Manager",
+        acting_user_role=payload.approver_role or "PLANT_MANAGER",
+        notes=payload.notes,
+        reference_id=inv.id,
+        reference_code=inv.invoice_number,
+        initiator_user_id=getattr(inv, "created_by_user_id", None),
+        released_status="RELEASED_TO_ACCOUNTS",
+        rejected_status="DISPUTED",
+    )
 
-    if decision == "APPROVE":
-        history.append({
-            "step": inv.current_approval_step,
-            "action": "APPROVED",
-            "approver_id": payload.approver_user_id,
-            "approver_name": payload.approver_name or "Manager",
-            "role": payload.approver_role or "PLANT_MANAGER",
-            "timestamp": now_iso,
-            "notes": payload.notes or "Timesheet and TES surcharges verified",
-        })
-        if inv.current_approval_step < inv.total_approval_steps:
-            inv.current_approval_step += 1
-        else:
-            # All internal approvals released! Invoice moves to Client Accounts
-            inv.client_status = "RELEASED_TO_ACCOUNTS"
-    elif decision == "REJECT":
-        history.append({
-            "step": inv.current_approval_step,
-            "action": "DISPUTED",
-            "approver_id": payload.approver_user_id,
-            "approver_name": payload.approver_name or "Manager",
-            "role": payload.approver_role or "PLANT_MANAGER",
-            "timestamp": now_iso,
-            "notes": payload.notes or "Invoice disputed by client management",
-        })
-        inv.client_status = "DISPUTED"
-    else:
-        raise HTTPException(status_code=400, detail="Invalid decision. Allowed: APPROVE, REJECT")
-
-    inv.approval_history = json.dumps(history)
+    inv.client_status = new_status
+    inv.current_approval_step = new_step
+    inv.total_approval_steps = total_steps
+    inv.approval_history = updated_history
     db.commit()
     db.refresh(inv)
     return {
-        "message": f"Invoice {decision} recorded",
+        "message": f"Invoice {payload.decision.strip().upper()} recorded",
         "client_status": inv.client_status,
         "current_approval_step": inv.current_approval_step,
         "total_approval_steps": inv.total_approval_steps

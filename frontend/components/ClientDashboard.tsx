@@ -19,7 +19,7 @@ import {
   RefreshCw,
 } from "lucide-react";
 
-import { SummaryType } from "../app/page";
+import { SummaryType, SiteItem } from "../app/page";
 import { DashboardClockAndWeather } from "./DashboardClockAndWeather";
 
 interface RequisitionApiItem {
@@ -61,9 +61,11 @@ interface ApprovalPreviewItem {
 
 interface ClientDashboardProps {
   clientId?: number;
+  currentUserId?: number;
   companyName: string;
   userName: string;
   selectedSite: string;
+  allowedSites?: SiteItem[];
   summary?: SummaryType;
   onNavigateToRequisitions?: () => void;
   onNavigateToAttendance?: () => void;
@@ -75,9 +77,11 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
 
 export const ClientDashboard: React.FC<ClientDashboardProps> = ({
   clientId = 1,
+  currentUserId,
   companyName,
   userName,
   selectedSite,
+  allowedSites = [],
   summary,
   onNavigateToRequisitions,
   onNavigateToAttendance,
@@ -85,25 +89,27 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
   onNavigateToApprovals,
 }) => {
   const [liveRequisitions, setLiveRequisitions] = useState<RequisitionApiItem[]>([]);
+  const [hasLoadedReqs, setHasLoadedReqs] = useState(false);
 
   useEffect(() => {
     const fetchActiveOrders = async () => {
       try {
-        const url =
-          selectedSite === "all"
-            ? `${API_BASE}/api/client/${clientId}/requisitions`
-            : `${API_BASE}/api/client/${clientId}/requisitions?site_id=${selectedSite}`;
-        const res = await fetch(url);
+        const params = new URLSearchParams();
+        if (currentUserId) params.set("user_id", String(currentUserId));
+        if (selectedSite !== "all") params.set("site_id", selectedSite);
+        const qs = params.toString() ? `?${params.toString()}` : "";
+        const res = await fetch(`${API_BASE}/api/client/${clientId}/requisitions${qs}`);
         if (res.ok) {
           const data = await res.json();
           setLiveRequisitions(data.requisitions || []);
+          setHasLoadedReqs(true);
         }
       } catch {
         // Fallback handled below
       }
     };
     fetchActiveOrders();
-  }, [clientId, selectedSite]);
+  }, [clientId, currentUserId, selectedSite]);
 
   // 1. STRENGTH OF WORKERS (Fetched from Agency ERP Attendance Register)
   const allWorkers = summary?.workers || [];
@@ -174,7 +180,18 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
     },
   ];
 
-  const sourceOrders = liveRequisitions.length > 0 ? liveRequisitions : fallbackOrders;
+  const allowedCodes = new Set(allowedSites.map((s) => s.site_code));
+  const allowedIdsSet = new Set(allowedSites.map((s) => s.id.toString()));
+  const activeSiteObj =
+    selectedSite !== "all" ? allowedSites.find((s) => s.id.toString() === selectedSite) : null;
+
+  const sourceOrders = hasLoadedReqs
+    ? liveRequisitions
+    : fallbackOrders.filter((o) =>
+        selectedSite !== "all"
+          ? o.site_id.toString() === selectedSite
+          : allowedIdsSet.size === 0 || allowedIdsSet.has(o.site_id.toString())
+      );
   const activeProcurementOrders = sourceOrders.filter((o) => o.status !== "FULFILLED");
 
   const getStatusBadgeStyle = (status: string) => {
@@ -227,8 +244,18 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
     },
   ];
 
+  const scopedInvoices = newInvoices.filter((inv) => {
+    if (activeSiteObj) {
+      return inv.site.includes(activeSiteObj.site_code);
+    }
+    if (allowedCodes.size > 0 && allowedCodes.size < 2) {
+      return Array.from(allowedCodes).some((code) => inv.site.includes(code));
+    }
+    return true;
+  });
+
   // 4. APPROVAL REQUESTS
-  const approvalRequests: ApprovalPreviewItem[] = [
+  const rawApprovalRequests: ApprovalPreviewItem[] = [
     {
       id: "APR-01",
       type: "Overtime",
@@ -262,18 +289,13 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
       targetModule: "m1.4_overtime",
       badgeColor: "bg-amber-500/10 text-amber-600 border-amber-500/20",
     },
-    {
-      id: "APR-04",
-      type: "Timesheet",
-      title: "Biometric Timesheet Batch (Week 46)",
-      workerOrScope: "8 Agency Workers • 312.5 Total Hrs",
-      site: "All Sites",
-      detail: "Synced from ERP Attendance Register — ready for billing",
-      submittedAt: "18 Nov 2026",
-      targetModule: "m1.4_timesheets",
-      badgeColor: "bg-blue-500/10 text-blue-600 border-blue-500/20",
-    },
   ];
+
+  const approvalRequests = rawApprovalRequests.filter((apr) => {
+    if (activeSiteObj) return apr.site === activeSiteObj.site_code;
+    if (allowedCodes.size > 0) return allowedCodes.has(apr.site);
+    return true;
+  });
 
   const attendanceRate =
     totalOnDuty > 0 ? Math.round((presentEmployees / totalOnDuty) * 100) : 0;
@@ -597,7 +619,7 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
                 New Invoices
               </h2>
               <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-600 border border-blue-500/20">
-                {newInvoices.length} Unsettled
+                {scopedInvoices.length} Unsettled
               </span>
             </div>
             <p className="text-xs text-[var(--text-secondary)] mt-0.5">
@@ -616,7 +638,7 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {newInvoices.map((inv) => (
+          {scopedInvoices.map((inv) => (
             <div
               key={inv.id}
               onClick={onNavigateToInvoices}

@@ -24,10 +24,14 @@ import {
   Briefcase
 } from "lucide-react";
 import { RequisitionItem } from "./TalentAcquisitionModule";
+import { SiteItem } from "../app/page";
 
 interface NewStaffingOrderFormProps {
   clientId: number;
+  currentUserId?: number;
+  userName?: string;
   companyName: string;
+  allowedSites?: SiteItem[];
   onCancel: () => void;
   onSubmitSuccess: (createdReq: RequisitionItem) => void;
   defaultSiteId?: number;
@@ -281,13 +285,26 @@ const STATUTORY_CARDS = [
 
 export const NewStaffingOrderForm: React.FC<NewStaffingOrderFormProps> = ({
   clientId,
+  currentUserId,
+  userName,
   companyName,
+  allowedSites = [],
   onCancel,
   onSubmitSuccess,
   defaultSiteId = 1,
 }) => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
+
+  // Strictly scope target site to allowedSites
+  const initialSite = useMemo(() => {
+    if (allowedSites.length === 1) return allowedSites[0];
+    return allowedSites.find((s) => s.id === defaultSiteId) || allowedSites[0] || null;
+  }, [allowedSites, defaultSiteId]);
+
+  const [selectedFormSiteId, setSelectedFormSiteId] = useState<number>(
+    initialSite ? initialSite.id : defaultSiteId
+  );
 
   // =========================================================================
   // STATE: CORE POSITION & NEED
@@ -329,10 +346,23 @@ export const NewStaffingOrderForm: React.FC<NewStaffingOrderFormProps> = ({
     );
   }, [staffingModel]);
 
-  // Workplace Location
-  const [workplaceAddress, setWorkplaceAddress] = useState("Lentokentänkatu 11");
-  const [city, setCity] = useState("Tampere");
+  // Workplace Location (auto-populated from selected/assigned site)
+  const [workplaceAddress, setWorkplaceAddress] = useState(
+    initialSite?.address || "Lentokentänkatu 11"
+  );
+  const [city, setCity] = useState(initialSite?.city || "Tampere");
   const [targetStartDate, setTargetStartDate] = useState("2026-12-01");
+
+  useEffect(() => {
+    const matched = allowedSites.find((s) => s.id === selectedFormSiteId) || allowedSites[0];
+    if (matched) {
+      if (selectedFormSiteId !== matched.id) {
+        setSelectedFormSiteId(matched.id);
+      }
+      setWorkplaceAddress(matched.address);
+      setCity(matched.city);
+    }
+  }, [allowedSites, selectedFormSiteId]);
 
   // Multi-Select Shift Schedule Models
   const [selectedShifts, setSelectedShifts] = useState<string[]>(["day", "2shift"]);
@@ -555,9 +585,13 @@ export const NewStaffingOrderForm: React.FC<NewStaffingOrderFormProps> = ({
         `Key Tasks: ${responsibilities.join("; ")}`
       ].join(" | ");
 
+      const activeSiteRecord =
+        allowedSites.find((s) => s.id === selectedFormSiteId) || allowedSites[0] || null;
+      const finalSiteId = activeSiteRecord ? activeSiteRecord.id : selectedFormSiteId;
+
       const payload = {
         client_id: clientId,
-        site_id: defaultSiteId,
+        site_id: finalSiteId,
         role_title: roleTitle.trim(),
         tes_category: sector,
         vacancies_count: vacancies,
@@ -566,7 +600,9 @@ export const NewStaffingOrderForm: React.FC<NewStaffingOrderFormProps> = ({
         shift_pattern: resolvedShiftPattern,
         salary_range_eur_hr: resolvedSalaryText,
         start_date: targetStartDate || new Date().toISOString().split("T")[0],
-        notes: comprehensiveNotes
+        notes: comprehensiveNotes,
+        created_by_user_id: currentUserId,
+        created_by_name: userName || "Client User",
       };
 
       const res = await fetch(`${API_BASE}/api/client/requisitions/create`, {
@@ -576,7 +612,8 @@ export const NewStaffingOrderForm: React.FC<NewStaffingOrderFormProps> = ({
       });
 
       if (!res.ok) {
-        throw new Error(`Failed to dispatch staffing order (HTTP ${res.status})`);
+        const errBody = await res.json().catch(() => ({}));
+        throw new Error(errBody.detail || `Failed to dispatch staffing order (HTTP ${res.status})`);
       }
 
       const resData = await res.json();
@@ -586,9 +623,9 @@ export const NewStaffingOrderForm: React.FC<NewStaffingOrderFormProps> = ({
         id: created.id || Date.now(),
         req_code: created.req_code || `REQ-${Date.now().toString().slice(-4)}`,
         client_id: clientId,
-        site_id: defaultSiteId,
-        site_name: `${workplaceAddress}, ${city}`,
-        site_code: city.slice(0, 3).toUpperCase(),
+        site_id: finalSiteId,
+        site_name: created.site_name || activeSiteRecord?.site_name || `${workplaceAddress}, ${city}`,
+        site_code: created.site_code || activeSiteRecord?.site_code || city.slice(0, 3).toUpperCase(),
         role_title: roleTitle.trim(),
         tes_category: sector,
         vacancies_count: vacancies,
@@ -602,6 +639,9 @@ export const NewStaffingOrderForm: React.FC<NewStaffingOrderFormProps> = ({
         status: created.status || (created.released_to_agency_at ? "RELEASED_TO_AGENCY" : "PENDING_INTERNAL_APPROVAL"),
         current_approval_step: created.current_approval_step || 1,
         total_approval_steps: created.total_approval_steps || 1,
+        current_approver_id: created.current_approver_id ?? null,
+        current_approver_name: created.current_approver_name ?? null,
+        approval_levels: created.approval_levels || [],
         approval_history: created.approval_history || [],
         candidates_count: 0,
         created_at: created.created_at || new Date().toISOString()
@@ -1051,6 +1091,45 @@ export const NewStaffingOrderForm: React.FC<NewStaffingOrderFormProps> = ({
             </div>
             <span className="text-[10px] font-bold text-rose-500">* Mandatory</span>
           </div>
+
+          {allowedSites.length > 0 && (
+            <div>
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1 flex items-center gap-1.5">
+                <Building2 className="w-3.5 h-3.5 text-blue-600" />
+                <span>Assigned Plant Facility</span> <span className="text-rose-500">*</span>
+              </label>
+              {allowedSites.length > 1 ? (
+                <select
+                  value={selectedFormSiteId}
+                  onChange={(e) => {
+                    const nextId = Number(e.target.value);
+                    setSelectedFormSiteId(nextId);
+                    const found = allowedSites.find((s) => s.id === nextId);
+                    if (found) {
+                      setWorkplaceAddress(found.address);
+                      setCity(found.city);
+                    }
+                  }}
+                  className="w-full px-3.5 py-2.5 text-xs font-bold rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-[#0f172a] text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
+                >
+                  {allowedSites.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.site_code} — {s.site_name} ({s.city})
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <div className="w-full px-3.5 py-2.5 text-xs font-bold rounded-xl border border-blue-500/30 bg-blue-500/5 text-slate-900 dark:text-white flex items-center justify-between">
+                  <span>
+                    {allowedSites[0].site_code} — {allowedSites[0].site_name} ({allowedSites[0].city})
+                  </span>
+                  <span className="text-[10px] font-semibold text-blue-600 dark:text-blue-400">
+                    Assigned Site Locked
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div className="sm:col-span-2">

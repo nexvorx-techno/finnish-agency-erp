@@ -27,6 +27,7 @@ import {
   Check
 } from "lucide-react";
 import { NewStaffingOrderForm } from "./NewStaffingOrderForm";
+import { SiteItem } from "../app/page";
 
 export interface RequisitionItem {
   id: number;
@@ -48,6 +49,15 @@ export interface RequisitionItem {
   status: string;
   current_approval_step?: number;
   total_approval_steps?: number;
+  current_approver_id?: number | null;
+  current_approver_name?: string | null;
+  current_approver_role?: string | null;
+  approval_levels?: Array<{
+    level: number;
+    approver_id?: number | null;
+    approver_name: string;
+    approver_role?: string;
+  }>;
   approval_history?: Array<{
     step: number;
     action: string;
@@ -57,6 +67,7 @@ export interface RequisitionItem {
     notes?: string;
   }>;
   released_to_agency_at?: string | null;
+  created_by_user_id?: number | null;
   created_by_name?: string;
   candidates_count: number;
   created_at: string;
@@ -121,6 +132,9 @@ interface RelocationItem {
 
 interface TalentAcquisitionModuleProps {
   clientId: number;
+  currentUserId?: number;
+  userRole?: string;
+  allowedSites?: SiteItem[];
   selectedSubTab: "m1.2_req" | "m1.2_shortlist" | "m1.2_interviews" | "m1.2_relocation";
   onChangeSubTab: (tab: "m1.2_req" | "m1.2_shortlist" | "m1.2_interviews" | "m1.2_relocation") => void;
   selectedSite: string;
@@ -131,6 +145,9 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
 
 export const TalentAcquisitionModule: React.FC<TalentAcquisitionModuleProps> = ({
   clientId,
+  currentUserId,
+  userRole = "SITE_MANAGER",
+  allowedSites = [],
   selectedSubTab,
   onChangeSubTab,
   selectedSite,
@@ -253,59 +270,94 @@ export const TalentAcquisitionModule: React.FC<TalentAcquisitionModuleProps> = (
   );
   const [interviewerName, setInterviewerName] = useState(userName || "Tapio Saarinen");
 
-  // Fetch Requisitions
+  // Fetch Requisitions (strictly scoped by currentUserId & selectedSite)
   const fetchRequisitions = useCallback(async () => {
     try {
-      const url =
-        selectedSite === "all"
-          ? `${API_BASE}/api/client/${clientId}/requisitions`
-          : `${API_BASE}/api/client/${clientId}/requisitions?site_id=${selectedSite}`;
-      const res = await fetch(url);
+      const params = new URLSearchParams();
+      if (currentUserId) params.set("user_id", String(currentUserId));
+      if (selectedSite !== "all") params.set("site_id", selectedSite);
+      const qs = params.toString() ? `?${params.toString()}` : "";
+      const res = await fetch(`${API_BASE}/api/client/${clientId}/requisitions${qs}`);
       if (res.ok) {
         const data = await res.json();
         setRequisitions(data.requisitions || []);
       }
     } catch {}
-  }, [clientId, selectedSite]);
+  }, [clientId, currentUserId, selectedSite]);
 
   // Fetch Candidates for Selected Requisition
-  const fetchCandidates = useCallback(async (reqId: number) => {
-    try {
-      const res = await fetch(`${API_BASE}/api/client/requisitions/${reqId}/candidates`);
-      if (res.ok) {
-        const data = await res.json();
-        setCandidates(data.candidates || []);
-      }
-    } catch {}
-  }, []);
+  const fetchCandidates = useCallback(
+    async (reqId: number) => {
+      try {
+        const qs = currentUserId ? `?user_id=${currentUserId}` : "";
+        const res = await fetch(`${API_BASE}/api/client/requisitions/${reqId}/candidates${qs}`);
+        if (res.ok) {
+          const data = await res.json();
+          setCandidates(data.candidates || []);
+        }
+      } catch {}
+    },
+    [currentUserId]
+  );
 
   // Fetch Interviews
   const fetchInterviews = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/client/${clientId}/interviews`);
+      const params = new URLSearchParams();
+      if (currentUserId) params.set("user_id", String(currentUserId));
+      if (selectedSite !== "all") params.set("site_id", selectedSite);
+      const qs = params.toString() ? `?${params.toString()}` : "";
+      const res = await fetch(`${API_BASE}/api/client/${clientId}/interviews${qs}`);
       if (res.ok) {
         const data = await res.json();
         setInterviews(data || []);
       }
     } catch {}
-  }, [clientId]);
+  }, [clientId, currentUserId, selectedSite]);
 
   // Fetch Relocations
   const fetchRelocations = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/client/${clientId}/relocation-tracker`);
+      const params = new URLSearchParams();
+      if (currentUserId) params.set("user_id", String(currentUserId));
+      if (selectedSite !== "all") params.set("site_id", selectedSite);
+      const qs = params.toString() ? `?${params.toString()}` : "";
+      const res = await fetch(`${API_BASE}/api/client/${clientId}/relocation-tracker${qs}`);
       if (res.ok) {
         const data = await res.json();
         setRelocations(data || []);
       }
     } catch {}
-  }, [clientId]);
+  }, [clientId, currentUserId, selectedSite]);
 
   useEffect(() => {
     fetchRequisitions();
     fetchInterviews();
     fetchRelocations();
   }, [fetchRequisitions, fetchInterviews, fetchRelocations]);
+
+  // Listen for direct notification jump ("open-approval-target")
+  useEffect(() => {
+    const handleJump = (ev: Event) => {
+      const detail = (ev as CustomEvent<{ module?: string; referenceId?: number | null }>).detail;
+      if (detail?.module === "m1.2_req") {
+        if (detail.referenceId) {
+          const found = requisitions.find((r) => r.id === detail.referenceId);
+          if (found) {
+            setViewingRequisition(found);
+            setSelectedReqForCandidates(found.id);
+            fetchCandidates(found.id);
+          } else {
+            fetchRequisitions();
+          }
+        } else {
+          setViewingRequisition(null);
+        }
+      }
+    };
+    window.addEventListener("open-approval-target", handleJump);
+    return () => window.removeEventListener("open-approval-target", handleJump);
+  }, [requisitions, fetchCandidates, fetchRequisitions]);
 
   useEffect(() => {
     if (selectedReqForCandidates) {
@@ -316,28 +368,52 @@ export const TalentAcquisitionModule: React.FC<TalentAcquisitionModuleProps> = (
   useEffect(() => {
     if (viewingRequisition) {
       const updated = requisitions.find((r) => r.id === viewingRequisition.id);
-      if (updated && (updated.candidates_count !== viewingRequisition.candidates_count || updated.status !== viewingRequisition.status || updated.fulfilled_count !== viewingRequisition.fulfilled_count)) {
+      if (
+        updated &&
+        (updated.candidates_count !== viewingRequisition.candidates_count ||
+          updated.status !== viewingRequisition.status ||
+          updated.current_approval_step !== viewingRequisition.current_approval_step ||
+          updated.current_approver_id !== viewingRequisition.current_approver_id ||
+          updated.fulfilled_count !== viewingRequisition.fulfilled_count)
+      ) {
         setViewingRequisition(updated);
       }
     }
   }, [requisitions, viewingRequisition]);
+
+  // Sync modal default site_id whenever allowedSites / selectedSite changes
+  useEffect(() => {
+    if (selectedSite !== "all") {
+      setNewReq((prev) => ({ ...prev, site_id: Number(selectedSite) }));
+    } else if (allowedSites.length > 0) {
+      setNewReq((prev) => ({ ...prev, site_id: allowedSites[0].id }));
+    }
+  }, [selectedSite, allowedSites]);
 
   // Handle Create Requisition
   const handleCreateRequisition = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
     try {
+      const targetSiteId =
+        allowedSites.length === 1 ? allowedSites[0].id : newReq.site_id;
       const res = await fetch(`${API_BASE}/api/client/requisitions/create`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           client_id: clientId,
           ...newReq,
+          site_id: targetSiteId,
+          created_by_user_id: currentUserId,
+          created_by_name: userName || "Client User",
         }),
       });
       if (res.ok) {
         setIsCreateReqOpen(false);
         await fetchRequisitions();
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new CustomEvent("refresh-notifications"));
+        }
       }
     } catch {} finally {
       setIsLoading(false);
@@ -402,26 +478,41 @@ export const TalentAcquisitionModule: React.FC<TalentAcquisitionModuleProps> = (
     }
   };
 
-  // Handle Requisition Approval Decision
+  // Handle Requisition Approval Decision (Strict Sequential Level Check)
   const [isApprovingReq, setIsApprovingReq] = useState(false);
+  const [approvalError, setApprovalError] = useState<string>("");
   const handleRequisitionDecision = async (reqId: number, decision: "APPROVE" | "REJECT") => {
     setIsApprovingReq(true);
+    setApprovalError("");
     try {
       const res = await fetch(`${API_BASE}/api/client/requisitions/${reqId}/approval-decision`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           decision,
-          approver_name: userName || "Site Manager",
-          approver_role: "SITE_MANAGER",
-          notes: decision === "APPROVE" ? "Approved for agency procurement release." : "Requirement rejected in internal review.",
+          approver_user_id: currentUserId,
+          approver_name: userName || "Approver",
+          approver_role: userRole || "SITE_MANAGER",
+          notes:
+            decision === "APPROVE"
+              ? "Approved in sequential review."
+              : "Requirement rejected in internal review.",
         }),
       });
       if (res.ok) {
         await fetchRequisitions();
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new CustomEvent("refresh-notifications"));
+        }
+      } else {
+        const errData = await res.json().catch(() => ({}));
+        setApprovalError(
+          errData.detail || "You are not authorized to approve at the current sequential level."
+        );
       }
     } catch (err) {
       console.error("Requisition approval failed:", err);
+      setApprovalError("Network error while submitting approval decision.");
     } finally {
       setIsApprovingReq(false);
     }
@@ -429,16 +520,26 @@ export const TalentAcquisitionModule: React.FC<TalentAcquisitionModuleProps> = (
 
   // Render dedicated full-page New Staffing Order Form if active
   if (isOrderPageOpen) {
+    const resolvedDefaultSiteId =
+      selectedSite !== "all"
+        ? Number(selectedSite)
+        : allowedSites[0]?.id || 1;
     return (
       <div className="w-full">
         <NewStaffingOrderForm
           clientId={clientId}
+          currentUserId={currentUserId}
+          userName={userName}
           companyName="Valmet Technologies Oy"
-          defaultSiteId={selectedSite === "2" ? 2 : 1}
+          allowedSites={allowedSites}
+          defaultSiteId={resolvedDefaultSiteId}
           onCancel={() => setIsOrderPageOpen(false)}
           onSubmitSuccess={async (createdReq) => {
             setRequisitions((prev) => [createdReq, ...prev]);
             await fetchRequisitions();
+            if (typeof window !== "undefined") {
+              window.dispatchEvent(new CustomEvent("refresh-notifications"));
+            }
             setIsOrderPageOpen(false);
           }}
         />
@@ -606,44 +707,97 @@ export const TalentAcquisitionModule: React.FC<TalentAcquisitionModuleProps> = (
               </div>
             </div>
 
-            {/* Enterprise Requisition Internal Approval Gate Banner */}
-            {viewingRequisition.status === "PENDING_INTERNAL_APPROVAL" && (
-              <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-in fade-in">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-9 h-9 rounded-xl bg-amber-500 text-white flex items-center justify-center font-bold text-xs shrink-0 shadow-xs">
-                    {viewingRequisition.current_approval_step || 1}/{viewingRequisition.total_approval_steps || 1}
-                  </div>
-                  <div>
-                    <div className="text-xs font-bold text-[var(--text-primary)]">
-                      Client Internal Verification (Step {viewingRequisition.current_approval_step || 1} of {viewingRequisition.total_approval_steps || 1})
-                    </div>
-                    <p className="text-[11px] text-[var(--text-secondary)] mt-0.5">
-                      This worker requirement must complete internal sign-off before being released to the Agency Portal for procurement.
-                    </p>
-                  </div>
-                </div>
+            {/* Enterprise Requisition Sequential Multi-Level Approval Gate Banner */}
+            {viewingRequisition.status === "PENDING_INTERNAL_APPROVAL" && (() => {
+              const curStep = viewingRequisition.current_approval_step || 1;
+              const totSteps = viewingRequisition.total_approval_steps || 1;
+              const designatedId = viewingRequisition.current_approver_id;
+              const designatedName = viewingRequisition.current_approver_name || `Level ${curStep} Approver`;
+              const canCurrentUserApprove =
+                designatedId != null ? Number(currentUserId) === Number(designatedId) : true;
+              const isFinalStep = curStep >= totSteps;
 
-                <div className="flex items-center gap-2 shrink-0">
-                  <button
-                    type="button"
-                    disabled={isApprovingReq}
-                    onClick={() => handleRequisitionDecision(viewingRequisition.id, "APPROVE")}
-                    className="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-xs flex items-center gap-1.5 cursor-pointer disabled:opacity-60 transition-all"
-                  >
-                    <Check className="w-3.5 h-3.5" />
-                    <span>Approve & Release</span>
-                  </button>
-                  <button
-                    type="button"
-                    disabled={isApprovingReq}
-                    onClick={() => handleRequisitionDecision(viewingRequisition.id, "REJECT")}
-                    className="px-3 py-1.5 rounded-xl border border-rose-500/30 text-rose-600 hover:bg-rose-500/10 text-xs font-semibold cursor-pointer disabled:opacity-60 transition-all"
-                  >
-                    Reject
-                  </button>
+              return (
+                <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 space-y-3 animate-in fade-in">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-9 h-9 rounded-xl bg-amber-500 text-white flex items-center justify-center font-bold text-xs shrink-0 shadow-xs">
+                        {curStep}/{totSteps}
+                      </div>
+                      <div>
+                        <div className="text-xs font-bold text-[var(--text-primary)]">
+                          Sequential Approval — Level {curStep} of {totSteps} ({designatedName})
+                        </div>
+                        <p className="text-[11px] text-[var(--text-secondary)] mt-0.5">
+                          {isFinalStep
+                            ? "Final approval step before releasing requirement to Agency Portal."
+                            : `After Level ${curStep} approves, notification will be sent to Level ${curStep + 1}.`}
+                        </p>
+                      </div>
+                    </div>
+
+                    {canCurrentUserApprove ? (
+                      <div className="flex items-center gap-2 shrink-0">
+                        <button
+                          type="button"
+                          disabled={isApprovingReq}
+                          onClick={() => handleRequisitionDecision(viewingRequisition.id, "APPROVE")}
+                          className="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-xs flex items-center gap-1.5 cursor-pointer disabled:opacity-60 transition-all"
+                        >
+                          <Check className="w-3.5 h-3.5" />
+                          <span>{isFinalStep ? "Approve & Release" : `Approve Level ${curStep}`}</span>
+                        </button>
+                        <button
+                          type="button"
+                          disabled={isApprovingReq}
+                          onClick={() => handleRequisitionDecision(viewingRequisition.id, "REJECT")}
+                          className="px-3 py-1.5 rounded-xl border border-rose-500/30 text-rose-600 hover:bg-rose-500/10 text-xs font-semibold cursor-pointer disabled:opacity-60 transition-all"
+                        >
+                          Reject
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="px-3 py-1.5 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-700 dark:text-amber-300 text-[11px] font-bold shrink-0">
+                        Locked — Awaiting Level {curStep} ({designatedName})
+                      </div>
+                    )}
+                  </div>
+
+                  {viewingRequisition.approval_levels && viewingRequisition.approval_levels.length > 0 && (
+                    <div className="flex flex-wrap items-center gap-1.5 pt-2 border-t border-amber-500/20 text-[11px]">
+                      {viewingRequisition.approval_levels.map((lvl, i) => {
+                        const done = lvl.level < curStep;
+                        const active = lvl.level === curStep;
+                        return (
+                          <React.Fragment key={lvl.level}>
+                            <span
+                              className={`px-2 py-0.5 rounded-lg font-semibold border ${
+                                done
+                                  ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/30"
+                                  : active
+                                  ? "bg-amber-500 text-white border-amber-500 font-bold"
+                                  : "bg-[var(--bg-card)] text-[var(--text-secondary)] border-[var(--border-color)]"
+                              }`}
+                            >
+                              L{lvl.level}: {lvl.approver_name} {done ? "✓" : ""}
+                            </span>
+                            {i < viewingRequisition.approval_levels!.length - 1 && (
+                              <span className="text-[var(--text-secondary)]">→</span>
+                            )}
+                          </React.Fragment>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {approvalError && (
+                    <div className="text-xs font-semibold text-rose-600 bg-rose-500/10 px-3 py-1.5 rounded-lg">
+                      {approvalError}
+                    </div>
+                  )}
                 </div>
-              </div>
-            )}
+              );
+            })()}
 
             {viewingRequisition.status === "RELEASED_TO_AGENCY" && (
               <div className="p-3.5 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex items-center gap-2.5 text-xs text-emerald-700 dark:text-emerald-400 font-semibold">
@@ -1589,12 +1743,20 @@ export const TalentAcquisitionModule: React.FC<TalentAcquisitionModuleProps> = (
                     Target Plant Facility *
                   </label>
                   <select
-                    value={newReq.site_id}
+                    value={allowedSites.length === 1 ? allowedSites[0].id : newReq.site_id}
+                    disabled={allowedSites.length === 1}
                     onChange={(e) => setNewReq({ ...newReq, site_id: Number(e.target.value) })}
-                    className="w-full px-3 py-2 rounded-xl bg-[var(--bg-secondary)] border border-[var(--border-color)] text-[var(--text-primary)] font-medium focus:outline-none"
+                    className="w-full px-3 py-2 rounded-xl bg-[var(--bg-secondary)] border border-[var(--border-color)] text-[var(--text-primary)] font-medium focus:outline-none disabled:opacity-75"
                   >
-                    <option value={1}>TMP-01 — Tampere Heavy Machinery</option>
-                    <option value={2}>JYK-02 — Jyväskylä Foundry & Automation</option>
+                    {allowedSites.length > 0 ? (
+                      allowedSites.map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.site_code} — {s.site_name}
+                        </option>
+                      ))
+                    ) : (
+                      <option value={1}>TMP-01 — Tampere Heavy Machinery</option>
+                    )}
                   </select>
                 </div>
               </div>
