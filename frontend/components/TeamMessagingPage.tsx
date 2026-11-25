@@ -78,7 +78,7 @@ export interface ChatMessage {
   is_read: boolean;
 }
 
-interface LinkedInMessagingPageProps {
+interface TeamMessagingPageProps {
   clientId?: number;
   companyName?: string;
   currentUser?: CurrentUser | null;
@@ -250,7 +250,7 @@ function getContactStatus(user: ChatUser): { statusText: string; colorClass: str
   };
 }
 
-export const LinkedInMessagingPage: React.FC<LinkedInMessagingPageProps> = ({
+export const TeamMessagingPage: React.FC<TeamMessagingPageProps> = ({
   clientId = 1,
   currentUser,
   onUnreadCountChange,

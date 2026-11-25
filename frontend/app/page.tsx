@@ -17,7 +17,7 @@ import { MasterDataModule, MasterSubTab } from "../components/MasterDataModule";
 import { ShiftPlanningModule, RosterSubTab } from "../components/ShiftPlanningModule";
 import { InvoicesSettlementModule } from "../components/InvoicesSettlementModule";
 import { WorkerOperationsModule } from "../components/WorkerOperationsModule";
-import { LinkedInMessagingPage } from "../components/LinkedInMessagingPage";
+import { TeamMessagingPage } from "../components/TeamMessagingPage";
 import { UserProfileModal } from "../components/UserProfileModal";
 import { GlobalLoader } from "../components/GlobalLoader";
 import { ArrowLeft, X } from "lucide-react";
@@ -876,7 +876,7 @@ export default function ClientPortalPage() {
               onNavigateToApprovals={(modId) => navigateToModule(modId || "m1.2_req")}
             />
           ) : activeModule === "messaging" ? (
-            <LinkedInMessagingPage
+            <TeamMessagingPage
               clientId={currentUser.clientId}
               companyName={summary.client_name}
               currentUser={currentUser}

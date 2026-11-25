@@ -231,7 +231,7 @@ export const RightRail: React.FC<RightRailProps> = ({
   const [userSearch, setUserSearch] = useState("");
 
   // =========================================================================
-  // LINKEDIN-STYLE FLOATING CHAT BOX (Active Conversation Window)
+  // DOCKED FLOATING CHAT BOX (Active Conversation Window)
   // =========================================================================
   const [floatingChat, setFloatingChat] = useState<{
     isOpen: boolean;
@@ -1006,7 +1006,7 @@ export const RightRail: React.FC<RightRailProps> = ({
       </div>
 
       {/* =================================================================== */}
-      {/* 2. LINKEDIN-STYLE FLOATING CHAT BOX (Docked above or beside Team Chat) */}
+      {/* 2. DOCKED FLOATING CHAT BOX (Docked above or beside Team Chat) */}
       {/* =================================================================== */}
       {floatingChat.isOpen && (
         <div
