@@ -10,7 +10,7 @@ from app.core.approval_engine import (
     execute_sequential_approval_step,
     get_approval_step_metadata,
 )
-from app.models.client import ClientInvoice, ClientCompany, ClientSite, ClientApprovalFlow
+from app.models.client import ClientInvoice, ClientCompany, ClientSite, ClientApprovalFlow, ClientCreditNote
 
 router = APIRouter(prefix="/api/client", tags=["Client Invoices & Settlement"])
 
@@ -29,6 +29,13 @@ class InvoicePaymentSubmitSchema(BaseModel):
     payment_receipt_url: Optional[str] = None
     notes: Optional[str] = None
     submitted_by_name: Optional[str] = "Accounts Department"
+
+class CreditNoteCreateSchema(BaseModel):
+    invoice_id: Optional[int] = None
+    site_id: Optional[int] = None
+    reason: str
+    subtotal_eur: float
+    notes: Optional[str] = None
 
 class InvoiceCreateDemoSchema(BaseModel):
     client_id: int
@@ -282,6 +289,96 @@ def agency_confirm_invoice_payment(
     return {"message": "Payment confirmed and settled by Agency", "client_status": inv.client_status}
 
 
+@router.get("/{client_id}/credit-notes")
+def list_client_credit_notes(
+    client_id: int,
+    site_id: Optional[int] = Query(None),
+    user_id: Optional[int] = Query(None),
+    db: Session = Depends(get_db)
+):
+    """Lists statutory credit notes and billing adjustments for the client."""
+    allowed_ids = get_allowed_site_ids_for_user(db, client_id, user_id, site_id)
+    query = db.query(ClientCreditNote).filter(ClientCreditNote.client_id == client_id)
+    if allowed_ids is not None:
+        query = query.filter(ClientCreditNote.site_id.in_(allowed_ids))
+    credit_notes = query.order_by(ClientCreditNote.id.desc()).all()
+
+    results = []
+    for cn in credit_notes:
+        inv = db.query(ClientInvoice).filter(ClientInvoice.id == cn.invoice_id).first() if cn.invoice_id else None
+        site = db.query(ClientSite).filter(ClientSite.id == cn.site_id).first() if cn.site_id else None
+        results.append({
+            "id": cn.id,
+            "credit_note_number": cn.credit_note_number,
+            "invoice_id": cn.invoice_id,
+            "invoice_number": inv.invoice_number if inv else "Account Credit Adjustment",
+            "client_id": cn.client_id,
+            "site_id": cn.site_id,
+            "site_name": site.site_name if site else "All Plant Sites",
+            "issue_date": cn.issue_date.isoformat() if cn.issue_date else "",
+            "reason": cn.reason,
+            "subtotal_eur": cn.subtotal_eur,
+            "alv_percentage": cn.alv_percentage,
+            "alv_amount_eur": cn.alv_amount_eur,
+            "total_amount_eur": cn.total_amount_eur,
+            "status": cn.status,
+            "notes": cn.notes,
+            "created_at": cn.created_at.isoformat() if cn.created_at else "",
+        })
+    return {"client_id": client_id, "credit_notes": results}
+
+
+@router.post("/{client_id}/credit-notes")
+def create_client_credit_note(
+    client_id: int,
+    payload: CreditNoteCreateSchema,
+    user_id: Optional[int] = Query(None),
+    db: Session = Depends(get_db)
+):
+    """Creates a formal Finnish Credit Note (Hyvityslasku) with statutory ALV 25.5% refund."""
+    site_id = payload.site_id
+    if payload.invoice_id:
+        inv = db.query(ClientInvoice).filter(
+            ClientInvoice.id == payload.invoice_id,
+            ClientInvoice.client_id == client_id
+        ).first()
+        if inv and not site_id:
+            site_id = inv.site_id
+
+    count = db.query(ClientCreditNote).filter(ClientCreditNote.client_id == client_id).count()
+    cn_num = f"CN-2026-{count + 1:04d}"
+
+    subtotal = abs(payload.subtotal_eur)
+    alv_pct = 25.5
+    alv_amt = round(subtotal * (alv_pct / 100.0), 2)
+    total_amt = round(subtotal + alv_amt, 2)
+
+    cn = ClientCreditNote(
+        credit_note_number=cn_num,
+        invoice_id=payload.invoice_id,
+        client_id=client_id,
+        site_id=site_id,
+        issue_date=date.today(),
+        reason=payload.reason.strip(),
+        subtotal_eur=subtotal,
+        alv_percentage=alv_pct,
+        alv_amount_eur=alv_amt,
+        total_amount_eur=total_amt,
+        status="APPLIED",
+        notes=payload.notes.strip() if payload.notes else None,
+    )
+    db.add(cn)
+    db.commit()
+    db.refresh(cn)
+
+    return {
+        "message": f"Credit Note {cn_num} generated successfully",
+        "credit_note_number": cn_num,
+        "total_amount_eur": total_amt,
+        "id": cn.id
+    }
+
+
 def seed_invoices_for_client(client_id: int, db: Session):
     """Seeds initial demonstration invoices with realistic Finnish statutory ALV 25.5%"""
     site = db.query(ClientSite).filter(ClientSite.client_id == client_id).first()
@@ -456,3 +553,23 @@ def seed_invoices_for_client(client_id: int, db: Session):
     db.add(inv2)
     db.add(inv3)
     db.commit()
+
+    # Seed initial demonstration Credit Note
+    cn_existing = db.query(ClientCreditNote).filter(ClientCreditNote.client_id == client_id).first()
+    if not cn_existing:
+        cn1 = ClientCreditNote(
+            credit_note_number="CN-2026-0001",
+            invoice_id=inv2.id,
+            client_id=client_id,
+            site_id=site_id,
+            issue_date=date(2026, 10, 5),
+            reason="Shift cancellation credit — Tampere Plant production line shutdown",
+            subtotal_eur=480.00,
+            alv_percentage=25.5,
+            alv_amount_eur=122.40,
+            total_amount_eur=602.40,
+            status="APPLIED",
+            notes="Credit note applied against October settlement balance",
+        )
+        db.add(cn1)
+        db.commit()

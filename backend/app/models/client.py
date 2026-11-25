@@ -218,6 +218,29 @@ class ClientInvoice(Base):
     site = relationship("ClientSite")
 
 
+class ClientCreditNote(Base):
+    __tablename__ = "client_credit_notes"
+
+    id = Column(Integer, primary_key=True, index=True)
+    credit_note_number = Column(String(50), unique=True, index=True, nullable=False)
+    invoice_id = Column(Integer, ForeignKey("client_invoices.id"), nullable=True)
+    client_id = Column(Integer, ForeignKey("client_companies.id"), nullable=False, index=True)
+    site_id = Column(Integer, ForeignKey("client_sites.id"), nullable=True)
+    issue_date = Column(Date, nullable=False)
+    reason = Column(String(255), nullable=False)
+    subtotal_eur = Column(Float, nullable=False)
+    alv_percentage = Column(Float, default=25.5)
+    alv_amount_eur = Column(Float, nullable=False)
+    total_amount_eur = Column(Float, nullable=False)
+    status = Column(String(50), default="APPLIED")  # APPLIED, REFUNDED, PENDING
+    notes = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    invoice = relationship("ClientInvoice")
+    company = relationship("ClientCompany")
+    site = relationship("ClientSite")
+
+
 class WorkerActionRequest(Base):
     __tablename__ = "worker_action_requests"
 
