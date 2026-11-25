@@ -12,8 +12,6 @@ import {
   CheckCheck,
   Workflow,
   Menu,
-  ChevronLeft,
-  Send,
   Maximize2,
 } from "lucide-react";
 
@@ -29,16 +27,6 @@ export interface FloatingChatUser {
   not_available_reason?: string | null;
   unread_count?: number;
   last_message?: { content: string; time_str: string } | null;
-}
-
-export interface FloatingChatMessage {
-  id: number;
-  sender_id: number;
-  sender_name: string;
-  content: string;
-  created_at: string;
-  date_str?: string;
-  time_str?: string;
 }
 
 export interface NotificationItem {
@@ -71,7 +59,7 @@ interface ClientHeaderProps {
   canSwitchSite?: boolean;
   onOpenPreferences: () => void;
   onOpenProfile?: () => void;
-  onOpenMessaging?: () => void;
+  onOpenMessaging?: (peerId?: number) => void;
   onNavigateToModule?: (moduleId: string) => void;
   unreadMessagesCount?: number;
   currentUser?: { fullName: string; role: string; avatarUrl?: string } | null;
@@ -170,13 +158,8 @@ export const ClientHeader: React.FC<ClientHeaderProps> = ({
   const [chatUsers, setChatUsers] = useState<FloatingChatUser[]>([]);
   const [isLoadingChatUsers, setIsLoadingChatUsers] = useState(false);
   const [chatSearchQuery, setChatSearchQuery] = useState("");
-  const [selectedChatPeer, setSelectedChatPeer] = useState<FloatingChatUser | null>(null);
-  const [miniMessages, setMiniMessages] = useState<FloatingChatMessage[]>([]);
-  const [isLoadingMiniMsgs, setIsLoadingMiniMsgs] = useState(false);
-  const [miniChatInput, setMiniChatInput] = useState("");
-  const [isSendingMiniMsg, setIsSendingMiniMsg] = useState(false);
+  const [chatVisibleLimit, setChatVisibleLimit] = useState(5);
   const chatRef = useRef<HTMLDivElement>(null);
-  const miniMessagesEndRef = useRef<HTMLDivElement>(null);
 
   const fetchChatUsers = useCallback(async () => {
     if (!clientId) return;
@@ -193,69 +176,6 @@ export const ClientHeader: React.FC<ClientHeaderProps> = ({
       setIsLoadingChatUsers(false);
     }
   }, [clientId, currentUserId]);
-
-  const fetchMiniMessages = useCallback(async (peerId: number) => {
-    if (!clientId) return;
-    setIsLoadingMiniMsgs(true);
-    try {
-      const uid = currentUserId || 1;
-      const params = new URLSearchParams({
-        channel_type: "DIRECT",
-        user_id: String(uid),
-        peer_id: String(peerId),
-      });
-      const res = await fetch(`${API_BASE}/api/client/${clientId}/chat/messages?${params.toString()}`);
-      if (res.ok) {
-        const data = await res.json();
-        setMiniMessages(data.messages || []);
-      }
-    } catch {} finally {
-      setIsLoadingMiniMsgs(false);
-    }
-  }, [clientId, currentUserId]);
-
-  const handleSendMiniMessage = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!miniChatInput.trim() || !selectedChatPeer || !clientId || isSendingMiniMsg) return;
-    const content = miniChatInput.trim();
-    const uid = currentUserId || 1;
-    const tempMsg: FloatingChatMessage = {
-      id: -Date.now(),
-      sender_id: uid,
-      sender_name: currentUser?.fullName || "Me",
-      content,
-      created_at: new Date().toISOString(),
-      time_str: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-    };
-    setMiniMessages((prev) => [...prev, tempMsg]);
-    setMiniChatInput("");
-    setIsSendingMiniMsg(true);
-    try {
-      const res = await fetch(`${API_BASE}/api/client/${clientId}/chat/messages`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          sender_id: uid,
-          sender_name: currentUser?.fullName || "Me",
-          sender_role: currentUser?.role || "CLIENT_ADMIN",
-          recipient_id: selectedChatPeer.id,
-          channel_type: "DIRECT",
-          content,
-        }),
-      });
-      if (res.ok) {
-        fetchMiniMessages(selectedChatPeer.id);
-      }
-    } catch {} finally {
-      setIsSendingMiniMsg(false);
-    }
-  };
-
-  useEffect(() => {
-    if (selectedChatPeer) {
-      miniMessagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-    }
-  }, [miniMessages, selectedChatPeer]);
 
   const unreadCount = notifications.filter((n) => !n.is_read).length;
 
@@ -474,9 +394,8 @@ export const ClientHeader: React.FC<ClientHeaderProps> = ({
                 setIsChatOpen(nextState);
                 if (nextState) {
                   setIsNotifOpen(false);
+                  setChatVisibleLimit(5);
                   fetchChatUsers();
-                } else {
-                  setSelectedChatPeer(null);
                 }
               }}
               title="Team Messages & Operations Chat"
@@ -496,57 +415,20 @@ export const ClientHeader: React.FC<ClientHeaderProps> = ({
 
             {/* Floating Chat Popover Dropdown */}
             {isChatOpen && (
-              <div className="absolute right-0 top-full mt-2 w-[calc(100vw-1.5rem)] sm:w-96 max-w-sm rounded-2xl bg-[var(--bg-card)] border border-[var(--border-color)] shadow-2xl z-50 overflow-hidden animate-in fade-in zoom-in-95 duration-150 flex flex-col h-[460px]">
+              <div className="absolute right-0 top-full mt-2 w-[calc(100vw-1.5rem)] sm:w-96 max-w-sm rounded-2xl bg-white dark:bg-slate-900 border border-[var(--border-color)] shadow-2xl z-50 overflow-hidden animate-in fade-in zoom-in-95 duration-150 flex flex-col max-h-[500px]">
                 {/* Header */}
                 <div className="p-3.5 border-b border-[var(--border-color)] bg-[var(--bg-secondary)] flex items-center justify-between shrink-0">
-                  {selectedChatPeer ? (
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setSelectedChatPeer(null)}
-                        className="p-1 rounded-lg text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-card)] cursor-pointer"
-                        title="Back to teammates"
-                      >
-                        <ChevronLeft className="w-4 h-4" />
-                      </button>
-                      <div className="relative">
-                        <div className="w-7 h-7 rounded-full bg-[var(--accent-color)]/10 text-[var(--accent-color)] flex items-center justify-center font-bold text-xs">
-                          {selectedChatPeer.full_name[0]}
-                        </div>
-                        <span
-                          className={`absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full border border-white dark:border-slate-900 ${
-                            selectedChatPeer.availability_status === "ONLINE"
-                              ? "bg-emerald-500"
-                              : "bg-slate-400"
-                          }`}
-                        />
-                      </div>
-                      <div className="min-w-0">
-                        <h4 className="text-xs font-black text-[var(--text-primary)] truncate">
-                          {selectedChatPeer.full_name}
-                        </h4>
-                        <p className="text-[10px] text-[var(--text-secondary)] truncate">
-                          {selectedChatPeer.availability_status === "ONLINE"
-                            ? "Active now"
-                            : selectedChatPeer.last_seen_str
-                            ? `Seen ${selectedChatPeer.last_seen_str}`
-                            : "Offline"}
-                        </p>
-                      </div>
+                  <div className="flex items-center gap-2">
+                    <div className="w-6 h-6 rounded-lg bg-[var(--accent-color)]/10 text-[var(--accent-color)] flex items-center justify-center">
+                      <MessageSquare className="w-3.5 h-3.5" />
                     </div>
-                  ) : (
-                    <div className="flex items-center gap-2">
-                      <div className="w-6 h-6 rounded-lg bg-[var(--accent-color)]/10 text-[var(--accent-color)] flex items-center justify-center">
-                        <MessageSquare className="w-3.5 h-3.5" />
-                      </div>
-                      <div>
-                        <h4 className="text-xs font-black text-[var(--text-primary)]">Team Messages</h4>
-                        <p className="text-[10px] text-[var(--text-secondary)]">
-                          {chatUsers.filter((u) => u.availability_status === "ONLINE").length} colleagues online
-                        </p>
-                      </div>
+                    <div>
+                      <h4 className="text-xs font-black text-[var(--text-primary)]">Team Messages</h4>
+                      <p className="text-[10px] text-[var(--text-secondary)]">
+                        {chatUsers.filter((u) => u.availability_status === "ONLINE").length} colleagues online
+                      </p>
                     </div>
-                  )}
+                  </div>
 
                   <div className="flex items-center gap-1">
                     {onOpenMessaging && (
@@ -556,7 +438,7 @@ export const ClientHeader: React.FC<ClientHeaderProps> = ({
                           setIsChatOpen(false);
                           onOpenMessaging();
                         }}
-                        title="Expand to Full Workspace"
+                        title="Open Full Messaging Page"
                         className="p-1.5 rounded-lg text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-card)] cursor-pointer"
                       >
                         <Maximize2 className="w-3.5 h-3.5" />
@@ -573,170 +455,132 @@ export const ClientHeader: React.FC<ClientHeaderProps> = ({
                   </div>
                 </div>
 
-                {/* Body Content */}
-                {selectedChatPeer ? (
-                  /* MINI-CHAT STREAM & INPUT */
-                  <div className="flex-1 flex flex-col min-h-0 bg-[var(--bg-secondary)]/10">
-                    <div className="flex-1 overflow-y-auto p-3 space-y-2.5 custom-scrollbar">
-                      {isLoadingMiniMsgs && miniMessages.length === 0 ? (
-                        <div className="space-y-3 p-2">
-                          <div className="flex items-start gap-2 max-w-[80%] animate-pulse">
-                            <div className="w-6 h-6 rounded-full bg-slate-200 dark:bg-slate-700/60 shrink-0" />
-                            <div className="h-8 w-40 rounded-xl bg-slate-200 dark:bg-slate-700/60" />
-                          </div>
-                          <div className="flex flex-col items-end ml-auto max-w-[80%] animate-pulse">
-                            <div className="h-8 w-44 rounded-xl bg-indigo-200/50 dark:bg-indigo-900/30" />
-                          </div>
-                        </div>
-                      ) : miniMessages.length === 0 ? (
-                        <div className="h-full flex flex-col items-center justify-center text-center p-4 text-[var(--text-secondary)]">
-                          <MessageSquare className="w-7 h-7 mx-auto mb-1.5 opacity-40 text-[var(--accent-color)]" />
-                          <p className="text-xs font-bold text-[var(--text-primary)]">Direct Conversation</p>
-                          <p className="text-[11px] mt-0.5">Send a quick message to coordinate with {selectedChatPeer.full_name}.</p>
-                        </div>
-                      ) : (
-                        miniMessages.map((msg, idx) => {
-                          const isMe = msg.sender_id === (currentUserId || 1);
-                          return (
-                            <div key={msg.id || idx} className={`flex flex-col ${isMe ? "items-end" : "items-start"}`}>
-                              <div
-                                className={`max-w-[85%] px-3 py-1.5 rounded-xl text-xs leading-relaxed ${
-                                  isMe
-                                    ? "bg-[var(--accent-color)] text-white rounded-br-xs"
-                                    : "bg-[var(--bg-card)] border border-[var(--border-color)] text-[var(--text-primary)] rounded-bl-xs"
-                                }`}
-                              >
-                                <p>{msg.content}</p>
-                                <span className={`text-[9px] block text-right mt-0.5 ${isMe ? "text-white/70" : "text-[var(--text-secondary)]"}`}>
-                                  {msg.time_str || ""}
-                                </span>
-                              </div>
-                            </div>
-                          );
-                        })
-                      )}
-                      <div ref={miniMessagesEndRef} />
-                    </div>
-
-                    {/* Quick Reply Form */}
-                    <form onSubmit={handleSendMiniMessage} className="p-2 border-t border-[var(--border-color)] bg-[var(--bg-card)] flex items-center gap-1.5">
-                      <input
-                        type="text"
-                        value={miniChatInput}
-                        onChange={(e) => setMiniChatInput(e.target.value)}
-                        placeholder={`Message ${selectedChatPeer.full_name.split(" ")[0]}...`}
-                        className="flex-1 px-3 py-1.5 text-xs rounded-xl bg-[var(--bg-secondary)] border border-[var(--border-color)] text-[var(--text-primary)] placeholder-[var(--text-secondary)] focus:outline-none focus:border-[var(--accent-color)]"
-                      />
-                      <button
-                        type="submit"
-                        disabled={!miniChatInput.trim() || isSendingMiniMsg}
-                        className="p-2 rounded-xl bg-[var(--accent-color)] text-white hover:bg-[var(--accent-hover)] disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-colors"
-                      >
-                        <Send className="w-3.5 h-3.5" />
-                      </button>
-                    </form>
+                {/* Quick Search Bar */}
+                <div className="p-2.5 border-b border-[var(--border-color)]/60 bg-white dark:bg-slate-900 shrink-0">
+                  <div className="relative">
+                    <Search className="w-3.5 h-3.5 text-[var(--text-secondary)] absolute left-3 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="text"
+                      value={chatSearchQuery}
+                      onChange={(e) => setChatSearchQuery(e.target.value)}
+                      placeholder="Search colleagues..."
+                      className="w-full pl-8 pr-3 py-1.5 text-xs rounded-xl bg-[var(--bg-secondary)] border border-[var(--border-color)] text-[var(--text-primary)] placeholder-[var(--text-secondary)] focus:outline-none focus:border-[var(--accent-color)]"
+                    />
                   </div>
-                ) : (
-                  /* CONTACTS / RECENT CHATS LIST */
-                  <div className="flex-1 flex flex-col min-h-0">
-                    <div className="p-2 border-b border-[var(--border-color)]/60 bg-[var(--bg-card)]">
-                      <div className="relative">
-                        <Search className="w-3 h-3 text-[var(--text-secondary)] absolute left-2.5 top-1/2 -translate-y-1/2" />
-                        <input
-                          type="text"
-                          value={chatSearchQuery}
-                          onChange={(e) => setChatSearchQuery(e.target.value)}
-                          placeholder="Search teammates..."
-                          className="w-full pl-7 pr-3 py-1 text-xs rounded-lg bg-[var(--bg-secondary)] border border-[var(--border-color)] text-[var(--text-primary)] placeholder-[var(--text-secondary)] focus:outline-none focus:border-[var(--accent-color)]"
-                        />
-                      </div>
-                    </div>
+                </div>
 
-                    <div className="flex-1 overflow-y-auto divide-y divide-[var(--border-color)]/60 custom-scrollbar">
-                      {isLoadingChatUsers && chatUsers.length === 0 ? (
-                        <div className="p-3 space-y-2.5">
-                          {[1, 2, 3].map((idx) => (
-                            <div key={idx} className="flex items-center gap-2.5 p-2 rounded-xl bg-[var(--bg-secondary)]/40 border border-[var(--border-color)]/60 animate-pulse">
-                              <div className="w-8 h-8 rounded-full bg-slate-200 dark:bg-slate-700/60 shrink-0" />
-                              <div className="flex-1 space-y-1.5">
-                                <div className="h-3 bg-slate-200 dark:bg-slate-700/60 rounded w-28" />
-                                <div className="h-2 bg-slate-200/70 dark:bg-slate-700/40 rounded w-16" />
-                              </div>
-                            </div>
-                          ))}
+                {/* Colleagues Recent List (5-10 people with Load More option) */}
+                <div className="overflow-y-auto divide-y divide-[var(--border-color)]/60 custom-scrollbar bg-white dark:bg-slate-900">
+                  {isLoadingChatUsers && chatUsers.length === 0 ? (
+                    <div className="p-3 space-y-2.5">
+                      {[1, 2, 3].map((idx) => (
+                        <div key={idx} className="flex items-center gap-2.5 p-2 rounded-xl bg-[var(--bg-secondary)]/40 border border-[var(--border-color)]/60 animate-pulse">
+                          <div className="w-8 h-8 rounded-full bg-slate-200 dark:bg-slate-700/60 shrink-0" />
+                          <div className="flex-1 space-y-1.5">
+                            <div className="h-3 bg-slate-200 dark:bg-slate-700/60 rounded w-28" />
+                            <div className="h-2 bg-slate-200/70 dark:bg-slate-700/40 rounded w-16" />
+                          </div>
                         </div>
-                      ) : (
-                        chatUsers
-                          .filter((u) => {
-                            if (!chatSearchQuery.trim()) return true;
-                            const q = chatSearchQuery.toLowerCase();
-                            return u.full_name.toLowerCase().includes(q) || u.role.toLowerCase().includes(q);
-                          })
-                          .map((u) => {
-                            const isOnline = u.availability_status === "ONLINE";
-                            const hasUnread = (u.unread_count || 0) > 0;
-                            return (
-                              <button
-                                key={u.id}
-                                type="button"
-                                onClick={() => {
-                                  setSelectedChatPeer(u);
-                                  fetchMiniMessages(u.id);
-                                }}
-                                className="w-full p-2.5 text-left flex items-center gap-2.5 hover:bg-[var(--bg-secondary)] cursor-pointer transition-colors"
-                              >
-                                <div className="relative shrink-0">
-                                  <div className="w-8 h-8 rounded-full bg-[var(--accent-color)]/10 text-[var(--accent-color)] font-bold text-xs flex items-center justify-center">
-                                    {u.full_name[0]}
-                                  </div>
-                                  <span
-                                    className={`absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full border border-white dark:border-slate-900 ${
-                                      isOnline ? "bg-emerald-500" : "bg-slate-400"
-                                    }`}
-                                  />
-                                </div>
-                                <div className="flex-1 min-w-0">
-                                  <div className="flex items-center justify-between">
-                                    <span className="text-xs font-bold text-[var(--text-primary)] truncate">
-                                      {u.full_name}
-                                    </span>
-                                    {u.last_message?.time_str && (
-                                      <span className="text-[10px] text-[var(--text-secondary)]">
-                                        {u.last_message.time_str}
-                                      </span>
-                                    )}
-                                  </div>
-                                  <p className="text-[11px] text-[var(--text-secondary)] truncate">
-                                    {u.last_message?.content || u.role.replace(/_/g, " ")}
-                                  </p>
-                                </div>
-                                {hasUnread && (
-                                  <span className="px-1.5 py-0.5 rounded-full bg-rose-500 text-white font-bold text-[9px] shrink-0">
-                                    {u.unread_count}
-                                  </span>
-                                )}
-                              </button>
-                            );
-                          })
-                      )}
+                      ))}
                     </div>
+                  ) : (() => {
+                    const filtered = chatUsers.filter((u) => {
+                      if (!chatSearchQuery.trim()) return true;
+                      const q = chatSearchQuery.toLowerCase();
+                      return u.full_name.toLowerCase().includes(q) || u.role.toLowerCase().includes(q);
+                    });
 
-                    {/* Bottom Link to Full Workspace */}
-                    {onOpenMessaging && (
-                      <div className="p-2 border-t border-[var(--border-color)] bg-[var(--bg-secondary)]/50 text-center">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setIsChatOpen(false);
-                            onOpenMessaging();
-                          }}
-                          className="text-[11px] font-bold text-[var(--accent-color)] hover:underline inline-flex items-center gap-1 cursor-pointer"
-                        >
-                          <span>Open full messaging workspace</span>
-                          <Maximize2 className="w-3 h-3" />
-                        </button>
-                      </div>
-                    )}
+                    if (filtered.length === 0) {
+                      return (
+                        <div className="p-8 text-center text-xs text-[var(--text-secondary)]">
+                          No teammates found
+                        </div>
+                      );
+                    }
+
+                    const visibleUsers = filtered.slice(0, chatVisibleLimit);
+                    const hasMore = filtered.length > chatVisibleLimit;
+
+                    return (
+                      <>
+                        {visibleUsers.map((u) => {
+                          const isOnline = u.availability_status === "ONLINE";
+                          const hasUnread = (u.unread_count || 0) > 0;
+                          return (
+                            <button
+                              key={u.id}
+                              type="button"
+                              onClick={() => {
+                                setIsChatOpen(false);
+                                onOpenMessaging?.(u.id);
+                              }}
+                              className="w-full p-3 text-left flex items-center gap-3 hover:bg-[var(--bg-secondary)] cursor-pointer transition-colors group"
+                            >
+                              <div className="relative shrink-0">
+                                <div className="w-9 h-9 rounded-full bg-[var(--accent-color)]/10 text-[var(--accent-color)] font-bold text-xs flex items-center justify-center">
+                                  {u.full_name[0]}
+                                </div>
+                                <span
+                                  className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-white dark:border-slate-900 ${
+                                    isOnline ? "bg-emerald-500" : "bg-slate-400"
+                                  }`}
+                                />
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center justify-between">
+                                  <span className="text-xs font-bold text-[var(--text-primary)] truncate group-hover:text-[var(--accent-color)] transition-colors">
+                                    {u.full_name}
+                                  </span>
+                                  {u.last_message?.time_str && (
+                                    <span className="text-[10px] text-[var(--text-secondary)]">
+                                      {u.last_message.time_str}
+                                    </span>
+                                  )}
+                                </div>
+                                <p className="text-[11px] text-[var(--text-secondary)] truncate">
+                                  {u.last_message?.content || u.role.replace(/_/g, " ")}
+                                </p>
+                              </div>
+                              {hasUnread && (
+                                <span className="px-1.5 py-0.5 rounded-full bg-rose-500 text-white font-black text-[9px] shrink-0">
+                                  {u.unread_count}
+                                </span>
+                              )}
+                            </button>
+                          );
+                        })}
+
+                        {/* Load More Option */}
+                        {hasMore && (
+                          <div className="p-2.5 text-center bg-[var(--bg-secondary)]/30 border-t border-[var(--border-color)]/60">
+                            <button
+                              type="button"
+                              onClick={() => setChatVisibleLimit((prev) => prev + 5)}
+                              className="w-full py-1.5 px-3 rounded-xl bg-[var(--bg-card)] hover:bg-[var(--bg-secondary)] border border-[var(--border-color)] text-xs font-bold text-[var(--accent-color)] cursor-pointer transition-all flex items-center justify-center gap-1.5 shadow-2xs"
+                            >
+                              <span>Load more teammates ({filtered.length - chatVisibleLimit} remaining)</span>
+                            </button>
+                          </div>
+                        )}
+                      </>
+                    );
+                  })()}
+                </div>
+
+                {/* Bottom Link to Full Workspace */}
+                {onOpenMessaging && (
+                  <div className="p-2.5 border-t border-[var(--border-color)] bg-[var(--bg-secondary)]/60 text-center shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsChatOpen(false);
+                        onOpenMessaging();
+                      }}
+                      className="text-xs font-bold text-[var(--accent-color)] hover:underline inline-flex items-center gap-1 cursor-pointer"
+                    >
+                      <span>Open full messaging workspace</span>
+                      <Maximize2 className="w-3 h-3" />
+                    </button>
                   </div>
                 )}
               </div>

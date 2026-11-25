@@ -139,6 +139,7 @@ export default function ClientPortalPage() {
   const [activeModule, setActiveModuleState] = useState("dashboard");
   const [navHistory, setNavHistory] = useState<string[]>(["dashboard"]);
   const [unreadChatCount, setUnreadChatCount] = useState<number>(0);
+  const [messagingPeerId, setMessagingPeerId] = useState<number | null>(null);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isLoadingOverlay, setIsLoadingOverlay] = useState(false);
   const [isInitialLoading, setIsInitialLoading] = useState(true);
@@ -842,7 +843,10 @@ export default function ClientPortalPage() {
           canSwitchSite={canSwitchSite}
           onOpenPreferences={() => setIsPreferencesOpen(true)}
           onOpenProfile={() => setIsProfileOpen(true)}
-          onOpenMessaging={() => navigateToModule("messaging")}
+          onOpenMessaging={(peerId?: number) => {
+            if (peerId) setMessagingPeerId(peerId);
+            navigateToModule("messaging");
+          }}
           onNavigateToModule={navigateToModule}
           unreadMessagesCount={unreadChatCount}
           currentUser={currentUser}
@@ -881,6 +885,7 @@ export default function ClientPortalPage() {
               companyName={summary.client_name}
               currentUser={currentUser}
               onUnreadCountChange={setUnreadChatCount}
+              initialPeerId={messagingPeerId}
             />
           ) : activeModule.startsWith("m1.2") ? (
             <TalentAcquisitionModule

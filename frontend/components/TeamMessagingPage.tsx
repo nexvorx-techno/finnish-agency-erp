@@ -83,6 +83,7 @@ interface TeamMessagingPageProps {
   companyName?: string;
   currentUser?: CurrentUser | null;
   onUnreadCountChange?: (count: number) => void;
+  initialPeerId?: number | null;
 }
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
@@ -254,6 +255,7 @@ export const TeamMessagingPage: React.FC<TeamMessagingPageProps> = ({
   clientId = 1,
   currentUser,
   onUnreadCountChange,
+  initialPeerId,
 }) => {
   const effectiveClientId = clientId || currentUser?.clientId || 1;
 
@@ -273,7 +275,16 @@ export const TeamMessagingPage: React.FC<TeamMessagingPageProps> = ({
   const [isLoadingMessages, setIsLoadingMessages] = useState<boolean>(false);
 
   // Selected peer ID (Stored as primitive ID to prevent object reference polling jitter and auto-switching)
-  const [selectedPeerId, setSelectedPeerId] = useState<number | null>(null);
+  const [selectedPeerId, setSelectedPeerId] = useState<number | null>(initialPeerId || null);
+
+  useEffect(() => {
+    if (initialPeerId) {
+      setSelectedPeerId(initialPeerId);
+      setActiveMessages([]);
+      setIsLoadingMessages(true);
+    }
+  }, [initialPeerId]);
+
   const selectedPeer = useMemo(() => {
     if (!selectedPeerId) return null;
     return chatUsers.find((u) => u.id === selectedPeerId) || null;
