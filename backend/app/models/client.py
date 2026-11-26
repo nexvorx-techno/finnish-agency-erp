@@ -53,6 +53,7 @@ class ClientUser(Base):
     id = Column(Integer, primary_key=True, index=True)
     client_id = Column(Integer, ForeignKey("client_companies.id"), nullable=False)
     full_name = Column(String(255), nullable=False)
+    username = Column(String(100), unique=True, nullable=True, index=True)  # Dedicated User ID / Login ID
     email = Column(String(255), unique=True, nullable=False)
     role = Column(String(50), nullable=False)  # CLIENT_ADMIN or operational role
     assigned_site_ids = Column(String(255), default="*")  # "*" or comma-separated site IDs
@@ -298,6 +299,27 @@ class SafetyIncidentLog(Base):
 
     company = relationship("ClientCompany")
     site = relationship("ClientSite")
+
+
+class SupportTicket(Base):
+    __tablename__ = "support_tickets"
+
+    id = Column(Integer, primary_key=True, index=True)
+    ticket_code = Column(String(50), unique=True, index=True, nullable=False)
+    client_id = Column(Integer, ForeignKey("client_companies.id"), nullable=True)
+    user_id = Column(Integer, nullable=True)
+    user_name = Column(String(255), nullable=False)
+    user_email = Column(String(255), nullable=False)
+    user_role = Column(String(100), nullable=True)
+    module_issue = Column(String(150), nullable=False)
+    priority = Column(String(50), default="MEDIUM")  # LOW, MEDIUM, HIGH, CRITICAL
+    explanation = Column(Text, nullable=False)
+    status = Column(String(50), default="OPEN")  # OPEN, IN_REVIEW, RESOLVED
+    forwarded_to = Column(String(255), default="nexvorx@gmail.com")
+    email_sent = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    company = relationship("ClientCompany")
 
 
 

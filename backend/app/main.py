@@ -24,6 +24,7 @@ def ensure_schema_columns() -> None:
     on existing PostgreSQL / SQLite deployments without downtime.
     """
     alter_statements = [
+        ("client_users", "username", "VARCHAR(100)"),
         ("client_notifications", "target_module", "VARCHAR(100)"),
         ("client_notifications", "reference_id", "INTEGER"),
         ("client_invoices", "created_by_user_id", "INTEGER"),

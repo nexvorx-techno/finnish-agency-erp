@@ -10,6 +10,7 @@ class ClientLoginRequest(BaseModel):
 class ClientLoginResponse(BaseModel):
     user_id: int
     full_name: str
+    username: Optional[str] = None
     email: str
     role: str
     client_id: int

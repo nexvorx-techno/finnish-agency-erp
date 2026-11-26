@@ -3,10 +3,14 @@ from datetime import datetime, date, time
 from typing import List, Optional
 from pydantic import BaseModel
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import or_, and_
+from sqlalchemy import or_, and_, func
 from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.site_access import get_allowed_site_ids_for_user, assert_user_can_access_site
+from app.core.email_service import (
+    send_welcome_credentials_email,
+    send_support_ticket_email,
+)
 from app.models.client import (
     ClientCompany,
     ClientSite,
@@ -16,7 +20,8 @@ from app.models.client import (
     TimesheetShiftRecord,
     ClientMasterData,
     ClientApprovalFlow,
-    ClientNotification
+    ClientNotification,
+    SupportTicket,
 )
 from app.schemas.client import (
     ClientLoginRequest,
@@ -48,7 +53,8 @@ def client_login(payload: ClientLoginRequest, db: Session = Depends(get_db)):
 
     user = db.query(ClientUser).filter(
         or_(
-            ClientUser.email == email_clean,
+            func.lower(ClientUser.email) == email_clean,
+            func.lower(ClientUser.username) == email_clean,
             and_(email_clean == "admin", ClientUser.email == "admin@frcp.in"),
         ),
         ClientUser.is_active == True,
@@ -66,6 +72,7 @@ def client_login(payload: ClientLoginRequest, db: Session = Depends(get_db)):
     return ClientLoginResponse(
         user_id=user.id,
         full_name=user.full_name,
+        username=user.username or user.email.split("@")[0],
         email=user.email,
         role=user.role,
         client_id=user.client_id,
@@ -747,6 +754,7 @@ RESTRICTED_ADMIN_ROLES = {"SUPER_ADMIN", "AGENCY_ADMIN", "CLIENT_ADMIN", "HR_ADM
 
 class OperationalUserCreate(BaseModel):
     full_name: str
+    username: Optional[str] = None
     email: str
     role: str  # Operational roles only
     assigned_site_ids: str = "1"  # Single site ID ("1") or comma-separated ("1,2") or "*"
@@ -756,6 +764,7 @@ class OperationalUserCreate(BaseModel):
 
 class OperationalUserUpdate(BaseModel):
     full_name: Optional[str] = None
+    username: Optional[str] = None
     email: Optional[str] = None
     role: Optional[str] = None
     assigned_site_ids: Optional[str] = None
@@ -782,6 +791,7 @@ def list_client_users(client_id: int, db: Session = Depends(get_db)):
                 "id": u.id,
                 "client_id": u.client_id,
                 "full_name": u.full_name,
+                "username": u.username or (u.email.split("@")[0] if u.email else f"user_{u.id}"),
                 "email": u.email,
                 "role": u.role,
                 "assigned_site_ids": u.assigned_site_ids,
@@ -810,9 +820,19 @@ def create_operational_user(
         )
 
     email_clean = payload.email.strip().lower()
-    existing = db.query(ClientUser).filter(ClientUser.email == email_clean).first()
+    raw_user = (payload.username or "").strip().lower()
+    username_clean = raw_user if raw_user else email_clean.split("@")[0]
+
+    existing = db.query(ClientUser).filter(
+        or_(
+            ClientUser.email == email_clean,
+            ClientUser.username == email_clean,
+            ClientUser.email == username_clean,
+            ClientUser.username == username_clean,
+        )
+    ).first()
     if existing:
-        raise HTTPException(status_code=400, detail="A user with this username/email already exists.")
+        raise HTTPException(status_code=400, detail="A user with this User ID or Work Email already exists.")
 
     import secrets
     temp_pwd = (payload.default_password or "").strip()
@@ -822,6 +842,7 @@ def create_operational_user(
     new_user = ClientUser(
         client_id=client_id,
         full_name=payload.full_name.strip(),
+        username=username_clean,
         email=email_clean,
         role=role_clean,
         assigned_site_ids=payload.assigned_site_ids.strip() or "1",
@@ -833,10 +854,27 @@ def create_operational_user(
     db.add(new_user)
     db.commit()
     db.refresh(new_user)
+
+    # Automatically send login credentials to the user's work email
+    try:
+        company = db.query(ClientCompany).filter(ClientCompany.id == client_id).first()
+        company_name = company.name if company else "Corporate Client"
+        send_welcome_credentials_email(
+            to_email=new_user.email,
+            full_name=new_user.full_name,
+            username=new_user.username,
+            temp_password=temp_pwd,
+            role=new_user.role,
+            company_name=company_name,
+        )
+    except Exception as err:
+        print(f"[EmailService Notification Notice] Could not dispatch welcome email: {err}")
+
     return {
         "id": new_user.id,
         "client_id": new_user.client_id,
         "full_name": new_user.full_name,
+        "username": new_user.username,
         "email": new_user.email,
         "role": new_user.role,
         "assigned_site_ids": new_user.assigned_site_ids,
@@ -875,10 +913,24 @@ def update_operational_user(
     if payload.email is not None and payload.email.strip():
         new_email = payload.email.strip().lower()
         if new_email != user.email:
-            dup = db.query(ClientUser).filter(ClientUser.email == new_email).first()
+            dup = db.query(ClientUser).filter(
+                or_(ClientUser.email == new_email, ClientUser.username == new_email),
+                ClientUser.id != user.id
+            ).first()
             if dup:
-                raise HTTPException(status_code=400, detail="This username/email is already in use.")
+                raise HTTPException(status_code=400, detail="This email is already in use.")
             user.email = new_email
+
+    if payload.username is not None and payload.username.strip():
+        new_username = payload.username.strip().lower()
+        if new_username != user.username:
+            dup = db.query(ClientUser).filter(
+                or_(ClientUser.username == new_username, ClientUser.email == new_username),
+                ClientUser.id != user.id
+            ).first()
+            if dup:
+                raise HTTPException(status_code=400, detail="This User ID is already in use.")
+            user.username = new_username
 
     if is_admin_account:
         # Client Admin can edit own profile / password / sites, but cannot be demoted or deactivated
@@ -917,6 +969,7 @@ def update_operational_user(
         "id": user.id,
         "client_id": user.client_id,
         "full_name": user.full_name,
+        "username": user.username or (user.email.split("@")[0] if user.email else f"user_{user.id}"),
         "email": user.email,
         "role": user.role,
         "assigned_site_ids": user.assigned_site_ids,
@@ -953,3 +1006,75 @@ def delete_operational_user(
     db.delete(user)
     db.commit()
     return {"status": "deleted", "user_id": user_id}
+
+
+# ==============================================================================
+# SUPPORT TICKETS & COMPLAINTS SYSTEM (Forwards to nexvorx@gmail.com)
+# ==============================================================================
+class SupportTicketCreate(BaseModel):
+    client_id: Optional[int] = None
+    user_id: Optional[str] = None
+    user_name: Optional[str] = None
+    user_email: Optional[str] = None
+    user_role: Optional[str] = None
+    module_issue: str
+    priority: str = "MEDIUM"
+    explanation: str
+
+
+@router.post("/support/tickets")
+def create_support_ticket(payload: SupportTicketCreate, db: Session = Depends(get_db)):
+    """
+    Creates a new support ticket/complaint and immediately forwards details to nexvorx@gmail.com.
+    """
+    import secrets
+    from datetime import datetime
+    ticket_code = f"TICK-{datetime.utcnow().strftime('%Y%m%d')}-{secrets.randbelow(9000) + 1000}"
+
+    client_name = "Valmet Technologies Oy"
+    if payload.client_id:
+        company = db.query(ClientCompany).filter(ClientCompany.id == payload.client_id).first()
+        if company:
+            client_name = company.name
+
+    ticket = SupportTicket(
+        ticket_code=ticket_code,
+        client_id=payload.client_id,
+        user_id=str(payload.user_id or ""),
+        user_name=payload.user_name or "Anonymous",
+        user_email=payload.user_email or "",
+        user_role=payload.user_role or "Operational User",
+        module_issue=payload.module_issue,
+        priority=payload.priority.upper(),
+        explanation=payload.explanation,
+        status="OPEN",
+        forwarded_to="nexvorx@gmail.com",
+        email_sent=True,
+    )
+    db.add(ticket)
+    db.commit()
+    db.refresh(ticket)
+
+    # Forward to nexvorx@gmail.com
+    try:
+        send_support_ticket_email({
+            "ticket_code": ticket_code,
+            "module_issue": payload.module_issue,
+            "priority": payload.priority.upper(),
+            "explanation": payload.explanation,
+            "user_name": payload.user_name or "Anonymous",
+            "user_id": payload.user_id or "N/A",
+            "user_email": payload.user_email or "N/A",
+            "user_role": payload.user_role or "Operational User",
+            "client_name": client_name,
+            "created_at": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC"),
+        })
+    except Exception as err:
+        print(f"[SupportTicket Notice] Failed to forward email: {err}")
+
+    return {
+        "status": "success",
+        "ticket_code": ticket_code,
+        "id": ticket.id,
+        "message": "Support ticket created and forwarded to nexvorx@gmail.com",
+    }

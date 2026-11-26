@@ -40,6 +40,7 @@ interface ClientUserRecord {
   id: number;
   client_id: number;
   full_name: string;
+  username?: string;
   email: string;
   role: string;
   assigned_site_ids: string;
@@ -173,6 +174,7 @@ export const ClientUserManagement: React.FC<ClientUserManagementProps> = ({
   const [createdCredentials, setCreatedCredentials] = useState<{
     name: string;
     username: string;
+    email: string;
     password: string;
   } | null>(null);
   const [copiedPwd, setCopiedPwd] = useState(false);
@@ -182,6 +184,7 @@ export const ClientUserManagement: React.FC<ClientUserManagementProps> = ({
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
 
   const [fullName, setFullName] = useState("");
+  const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
   const [selectedRole, setSelectedRole] = useState("HR Manager");
   const [defaultPassword, setDefaultPassword] = useState(() => generateDefaultPassword());
@@ -227,6 +230,7 @@ export const ClientUserManagement: React.FC<ClientUserManagementProps> = ({
   const resetForm = () => {
     setEditingUser(null);
     setFullName("");
+    setUsername("");
     setEmail("");
     const initialRole = masterJobRoles[1] || "HR Manager";
     setSelectedRole(initialRole);
@@ -241,6 +245,7 @@ export const ClientUserManagement: React.FC<ClientUserManagementProps> = ({
   const openEditModal = (u: ClientUserRecord) => {
     setEditingUser(u);
     setFullName(u.full_name);
+    setUsername(u.username || u.email.split("@")[0] || "");
     setEmail(u.email);
     const displayRole = u.role.replace(/_/g, " ");
     const matched = masterJobRoles.find(
@@ -344,15 +349,19 @@ export const ClientUserManagement: React.FC<ClientUserManagementProps> = ({
           : `${API_BASE}/api/client/${clientId}/users`;
       const method = isEdit ? "PATCH" : "POST";
 
+      const finalUsername = (username || "").trim().toLowerCase() || email.trim().toLowerCase().split("@")[0];
+
       const payload = isEdit
         ? editingUser?.is_client_admin
           ? {
               full_name: fullName.trim(),
+              username: finalUsername,
               email: email.trim().toLowerCase(),
               ...(resetPassword.trim() ? { reset_password: resetPassword.trim() } : {}),
             }
           : {
               full_name: fullName.trim(),
+              username: finalUsername,
               email: email.trim().toLowerCase(),
               role: roleCode,
               assigned_site_ids: assignedStr,
@@ -361,6 +370,7 @@ export const ClientUserManagement: React.FC<ClientUserManagementProps> = ({
             }
         : {
             full_name: fullName.trim(),
+            username: finalUsername,
             email: email.trim().toLowerCase(),
             role: roleCode,
             assigned_site_ids: assignedStr,
@@ -387,10 +397,11 @@ export const ClientUserManagement: React.FC<ClientUserManagementProps> = ({
       if (!isEdit) {
         setCreatedCredentials({
           name: savedName,
-          username: data.email,
+          username: data.username || finalUsername,
+          email: data.email || email.trim().toLowerCase(),
           password: data.default_password || defaultPassword,
         });
-        setSuccessMsg(`Created operational user "${savedName}" with mandatory first-login password change.`);
+        setSuccessMsg(`Created operational user "${savedName}" with mandatory first-login password change. Login credentials sent to ${data.email || email}.`);
         resetForm();
         await fetchUsersAndRoles();
         onChangeSubTab("m1.9_user_list");
@@ -511,7 +522,7 @@ export const ClientUserManagement: React.FC<ClientUserManagementProps> = ({
       )}
 
       {/* 1. Identity */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div>
           <label className="block text-xs font-bold text-[var(--text-primary)] mb-1">
             Full Name *
@@ -528,16 +539,35 @@ export const ClientUserManagement: React.FC<ClientUserManagementProps> = ({
 
         <div>
           <label className="block text-xs font-bold text-[var(--text-primary)] mb-1">
-            User Name / Work Email *
+            User ID (Login Username) *
           </label>
           <input
             type="text"
+            required
+            value={username}
+            onChange={(e) => setUsername(e.target.value.toLowerCase().replace(/\s+/g, ""))}
+            placeholder="e.g. mikkov or EMP-1042"
+            className="w-full px-3.5 py-2.5 rounded-xl bg-[var(--bg-secondary)] border border-[var(--border-color)] text-xs text-[var(--text-primary)] font-mono focus:outline-none focus:border-[var(--accent-color)]"
+          />
+          <span className="text-[10px] text-[var(--text-secondary)] mt-0.5 block">Unique ID used to log in</span>
+        </div>
+
+        <div>
+          <label className="block text-xs font-bold text-[var(--text-primary)] mb-1 flex items-center justify-between">
+            <span>Work Email ID *</span>
+            <span className="text-[10px] text-emerald-600 font-semibold flex items-center gap-1">
+              <Mail className="w-2.5 h-2.5" /> Email Credentials
+            </span>
+          </label>
+          <input
+            type="email"
             required
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             placeholder="e.g. mikko.virtanen@valmet.com"
             className="w-full px-3.5 py-2.5 rounded-xl bg-[var(--bg-secondary)] border border-[var(--border-color)] text-xs text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent-color)]"
           />
+          <span className="text-[10px] text-[var(--text-secondary)] mt-0.5 block">Login details will be emailed here</span>
         </div>
       </div>
 
@@ -922,10 +952,14 @@ export const ClientUserManagement: React.FC<ClientUserManagementProps> = ({
               <X className="w-4 h-4" />
             </button>
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs bg-[var(--bg-card)] p-3 rounded-xl border border-emerald-500/20">
+          <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 text-xs bg-[var(--bg-card)] p-3 rounded-xl border border-emerald-500/20">
             <div>
-              <span className="text-[10px] text-[var(--text-secondary)] block">User Name</span>
+              <span className="text-[10px] text-[var(--text-secondary)] block">User ID (Login ID)</span>
               <strong className="font-mono text-[var(--text-primary)]">{createdCredentials.username}</strong>
+            </div>
+            <div>
+              <span className="text-[10px] text-[var(--text-secondary)] block">Work Email ID</span>
+              <strong className="font-mono text-[var(--text-primary)]">{createdCredentials.email}</strong>
             </div>
             <div>
               <span className="text-[10px] text-[var(--text-secondary)] block">Default Temporary Password</span>
@@ -936,7 +970,7 @@ export const ClientUserManagement: React.FC<ClientUserManagementProps> = ({
                 type="button"
                 onClick={() =>
                   handleCopyPassword(
-                    `User Name: ${createdCredentials.username}\nTemporary Password: ${createdCredentials.password}`
+                    `User ID: ${createdCredentials.username}\nWork Email: ${createdCredentials.email}\nTemporary Password: ${createdCredentials.password}`
                   )
                 }
                 className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-[11px] font-bold flex items-center gap-1.5 cursor-pointer"
@@ -947,7 +981,7 @@ export const ClientUserManagement: React.FC<ClientUserManagementProps> = ({
             </div>
           </div>
           <p className="text-[11px] text-emerald-800 dark:text-emerald-300">
-            On first login, <strong>{createdCredentials.name}</strong> will be required to create a new password before entering the portal.
+            Login details have been dispatched to <strong>{createdCredentials.email}</strong>. On first login, <strong>{createdCredentials.name}</strong> will be required to create a new password before entering the portal.
           </p>
         </div>
       )}
@@ -1035,6 +1069,11 @@ export const ClientUserManagement: React.FC<ClientUserManagementProps> = ({
                       </div>
 
                       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[var(--text-secondary)]">
+                        <span className="flex items-center gap-1 font-mono font-bold text-[var(--text-primary)]">
+                          <UserCog className="w-3.5 h-3.5 text-[var(--accent-color)]" />
+                          ID: {u.username || u.email.split("@")[0]}
+                        </span>
+                        <span>•</span>
                         <span className="flex items-center gap-1 font-mono">
                           <Mail className="w-3 h-3 opacity-70" />
                           {u.email}

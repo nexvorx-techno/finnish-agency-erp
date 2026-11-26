@@ -21,6 +21,7 @@ interface ClientLoginProps {
   onLoginSuccess: (userData: {
     userId: number;
     fullName: string;
+    username?: string;
     email: string;
     role: string;
     clientId: number;
@@ -133,6 +134,7 @@ export const ClientLogin: React.FC<ClientLoginProps> = ({
           onLoginSuccess({
             userId: data.user_id,
             fullName: data.full_name,
+            username: data.username || (data.email ? data.email.split("@")[0] : ""),
             email: data.email,
             role: data.role,
             clientId: data.client_id,
@@ -420,8 +422,9 @@ export const ClientLogin: React.FC<ClientLoginProps> = ({
               {/* Form */}
               <form onSubmit={handlePasswordLogin} autoComplete="off" className="space-y-4">
                 <div>
-                  <label className="block text-xs font-semibold text-[var(--text-primary)] mb-1.5">
-                    User Name
+                  <label className="block text-xs font-semibold text-[var(--text-primary)] mb-1.5 flex items-center justify-between">
+                    <span>User ID / Work Email</span>
+                    <span className="text-[10px] text-[var(--text-secondary)]">Sign in with User ID or Email</span>
                   </label>
                   <div className="relative">
                     <Mail className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-secondary)]" />
@@ -429,7 +432,7 @@ export const ClientLogin: React.FC<ClientLoginProps> = ({
                       type="text"
                       required
                       autoComplete="off"
-                      placeholder="Enter your user name"
+                      placeholder="e.g. mikkov or mikko@valmet.com"
                       value={email}
                       onChange={(e) => {
                         setEmail(e.target.value);

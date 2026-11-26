@@ -20,6 +20,7 @@ import { WorkerOperationsModule } from "../components/WorkerOperationsModule";
 import { TeamMessagingPage } from "../components/TeamMessagingPage";
 import { UserProfileModal } from "../components/UserProfileModal";
 import { GlobalLoader } from "../components/GlobalLoader";
+import { GlobalFooter } from "../components/GlobalFooter";
 import { ArrowLeft, X } from "lucide-react";
 
 export interface WorkerItem {
@@ -64,6 +65,7 @@ export interface SummaryType {
 export interface CurrentUser {
   userId: number;
   fullName: string;
+  username?: string;
   email: string;
   role: string;
   clientId: number;
@@ -743,6 +745,7 @@ export default function ClientPortalPage() {
           sessionTimeoutSec={sessionTimeoutSec}
           onSessionTimeoutChange={handleSessionTimeoutChange}
         />
+        <GlobalFooter currentUser={null} />
         <GlobalLoader isLoading={isLoadingOverlay || isInitialLoading} />
       </>
     );
@@ -1034,6 +1037,9 @@ export default function ClientPortalPage() {
             </div>
           )}
         </main>
+
+        {/* Global Footer (Raise a Ticket & Nexvorx Technologies Trademark) */}
+        <GlobalFooter currentUser={currentUser} />
       </div>
 
       {/* 3. Bottom Side Bar (Rendered when menuPosition === 'bottom' on desktop only) */}
