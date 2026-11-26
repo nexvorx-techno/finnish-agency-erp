@@ -234,7 +234,6 @@ Finnish Agency ERP &bull; A Product of Nexvorx Technologies
         </div>
         <div class="footer">
           Forwarded automatically to <strong>{SUPPORT_INBOX}</strong><br>
-          <a href="{PORTAL_URL}/?resolve_ticket={ticket_code}" style="display:inline-block; margin-top:8px; padding:6px 14px; background:#2563eb; color:#ffffff; text-decoration:none; border-radius:6px; font-weight:bold; font-size:11px;">View & Resolve in ERP Portal</a><br><br>
           A Product of Nexvorx Technologies &bull; Trademark
         </div>
       </div>
