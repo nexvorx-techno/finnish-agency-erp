@@ -830,7 +830,7 @@ export default function ClientPortalPage() {
       )}
 
       {/* 2. Main Area (Header + Canvas) */}
-      <div className="flex-1 flex flex-col min-w-0 h-screen overflow-hidden">
+      <div className="flex-1 flex flex-col min-w-0 h-screen overflow-hidden relative">
         {/* Top Header with Back / Dashboard Navigation Controls & Mobile Menu Toggle */}
         <ClientHeader
           activeModule={activeModule}
@@ -865,7 +865,7 @@ export default function ClientPortalPage() {
               ? menuPosition === "bottom"
                 ? "p-2 sm:p-4 pb-24 lg:pb-28 h-[calc(100vh-3.5rem)] flex flex-col"
                 : "p-2 sm:p-4 h-[calc(100vh-3.5rem)] flex flex-col"
-              : `p-3.5 sm:p-6 lg:p-8 ${menuPosition === "bottom" ? "lg:pb-32 pb-6" : ""}`
+              : `p-3.5 sm:p-6 lg:p-8 ${menuPosition === "bottom" ? "lg:pb-32 pb-20" : "pb-20"}`
           }`}
         >
           {activeModule === "dashboard" ? (

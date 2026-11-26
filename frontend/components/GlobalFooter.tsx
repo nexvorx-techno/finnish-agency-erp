@@ -13,35 +13,33 @@ export const GlobalFooter: React.FC<GlobalFooterProps> = ({ currentUser }) => {
 
   return (
     <>
-      <footer className="mt-auto border-t border-[var(--border-color)] bg-[var(--bg-card)]/80 backdrop-blur-md px-4 sm:px-6 py-3 transition-colors">
-        <div className="flex flex-col sm:flex-row items-center justify-between gap-2.5 text-xs">
-          {/* Left Corner: Raise a Ticket */}
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => setIsTicketModalOpen(true)}
-              className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-purple-500/10 hover:bg-purple-500/20 text-purple-700 dark:text-purple-300 border border-purple-500/25 text-xs font-bold transition-all cursor-pointer shadow-sm hover:scale-[1.02] active:scale-[0.98]"
-            >
-              <LifeBuoy className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400" />
-              <span>Raise a Ticket</span>
-              <span className="text-[10px] font-medium text-purple-600/80 dark:text-purple-300/80 border-l border-purple-500/30 pl-1.5 ml-0.5 hidden xs:inline">
-                File a Complaint
-              </span>
-            </button>
-            <span className="text-[11px] text-[var(--text-secondary)] hidden md:inline">
-              Need technical or operational assistance? Our engineering desk is on standby.
+      {/* Floating Corner Overlay: Leaves center 100% clear for Floating Dock */}
+      <div className="absolute bottom-0 inset-x-0 pointer-events-none z-30 flex items-center justify-between p-3.5 sm:p-5 transition-all">
+        {/* Left Corner: Raise a Ticket */}
+        <div className="pointer-events-auto">
+          <button
+            type="button"
+            onClick={() => setIsTicketModalOpen(true)}
+            className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-[var(--bg-card)]/90 hover:bg-[var(--bg-card)] text-[var(--text-primary)] border border-[var(--border-color)] shadow-sm hover:shadow-md text-xs font-semibold transition-all hover:scale-[1.02] active:scale-[0.98] backdrop-blur-md cursor-pointer group"
+            title="Raise a Support Ticket / Complaint"
+          >
+            <span className="w-5 h-5 rounded-full bg-purple-500/10 text-purple-600 dark:text-purple-400 flex items-center justify-center group-hover:bg-purple-600 group-hover:text-white transition-colors">
+              <LifeBuoy className="w-3 h-3" />
             </span>
-          </div>
+            <span className="text-xs font-bold text-[var(--text-primary)]">Raise a Ticket</span>
+          </button>
+        </div>
 
-          {/* Right Corner: Nexvorx Technologies Trademark */}
-          <div className="flex items-center gap-2 text-[var(--text-secondary)] text-[11px] sm:text-xs font-medium">
+        {/* Right Corner: Nexvorx Technologies Trademark */}
+        <div className="pointer-events-auto">
+          <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-[var(--bg-card)]/85 border border-[var(--border-color)] shadow-xs text-[11px] sm:text-xs text-[var(--text-secondary)] backdrop-blur-md select-none">
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-            <span className="tracking-wide">
+            <span className="tracking-tight">
               A Product of <strong className="text-[var(--text-primary)] font-bold">Nexvorx Technologies™</strong>
             </span>
           </div>
         </div>
-      </footer>
+      </div>
 
       {/* Complaint / Support Ticket Popup Modal */}
       <SupportTicketModal
