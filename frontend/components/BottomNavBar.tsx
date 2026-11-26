@@ -24,7 +24,9 @@ import {
   Database,
   UserCog,
   UserPlus,
-  GitBranch
+  GitBranch,
+  MessageSquare,
+  HelpCircle,
 } from "lucide-react";
 
 interface SubMenuItem {
@@ -278,6 +280,33 @@ export const BottomNavBar: React.FC<BottomNavBarProps> = ({
           label: "Master Approval Flow",
           description: "Multi-level approval stages & designated approvers",
           icon: GitBranch,
+        },
+      ],
+    },
+    {
+      id: "grp_communications",
+      title: "Communications",
+      shortLabel: "Messages",
+      icon: MessageSquare,
+      items: [
+        {
+          id: "messaging",
+          label: "Team Messaging",
+          description: "Internal team chat, notifications & broadcasts",
+          icon: MessageSquare,
+          statusBadge: "Live",
+        },
+        {
+          id: "raise_query",
+          label: "Raise a Query",
+          description: "Submit query or technical support request to Nexvorx desk",
+          icon: HelpCircle,
+        },
+        {
+          id: "track_query",
+          label: "Track Query",
+          description: "Monitor status and engineer resolution reports",
+          icon: Clock,
         },
       ],
     },

@@ -28,6 +28,7 @@ import {
   GitBranch,
   User,
   MessageSquare,
+  HelpCircle,
 } from "lucide-react";
 
 interface SubMenuItem {
@@ -252,6 +253,16 @@ export const ClientSidebar: React.FC<ClientSidebarProps> = ({
           label: "Team Messaging",
           icon: MessageSquare,
           statusBadge: "Live",
+        },
+        {
+          id: "raise_query",
+          label: "Raise a Query",
+          icon: HelpCircle,
+        },
+        {
+          id: "track_query",
+          label: "Track Query",
+          icon: Clock,
         },
       ],
     },

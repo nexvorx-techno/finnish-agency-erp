@@ -18,6 +18,7 @@ import { ShiftPlanningModule, RosterSubTab } from "../components/ShiftPlanningMo
 import { InvoicesSettlementModule } from "../components/InvoicesSettlementModule";
 import { WorkerOperationsModule } from "../components/WorkerOperationsModule";
 import { TeamMessagingPage } from "../components/TeamMessagingPage";
+import { SupportQueryModule } from "../components/SupportQueryModule";
 import { UserProfileModal } from "../components/UserProfileModal";
 import { GlobalLoader } from "../components/GlobalLoader";
 import { GlobalFooter } from "../components/GlobalFooter";
@@ -889,6 +890,14 @@ export default function ClientPortalPage() {
               currentUser={currentUser}
               onUnreadCountChange={setUnreadChatCount}
               initialPeerId={messagingPeerId}
+            />
+          ) : activeModule === "raise_query" || activeModule === "track_query" ? (
+            <SupportQueryModule
+              currentUser={currentUser}
+              companyName={summary.client_name}
+              activeSubTab={activeModule === "track_query" ? "track_query" : "raise_query"}
+              onChangeSubTab={(tab) => navigateToModule(tab)}
+              onNavigateToMessaging={() => navigateToModule("messaging")}
             />
           ) : activeModule.startsWith("m1.2") ? (
             <TalentAcquisitionModule
