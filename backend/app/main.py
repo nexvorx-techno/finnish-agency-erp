@@ -7,12 +7,14 @@ import app.models.client
 import app.models.talent
 import app.models.roster
 import app.models.chat
+import app.models.approvals_timesheets
 from app.api.client_routes import router as client_router
 from app.api.talent_routes import router as talent_router
 from app.api.roster_routes import router as roster_router
 from app.api.chat_routes import router as chat_router
 from app.api.invoice_routes import router as invoice_router
 from app.api.operations_routes import router as operations_router
+from app.api.approvals_timesheets_routes import router as approvals_timesheets_router
 
 # Create database tables
 Base.metadata.create_all(bind=engine)
@@ -86,6 +88,7 @@ app.include_router(roster_router)
 app.include_router(chat_router)
 app.include_router(invoice_router)
 app.include_router(operations_router)
+app.include_router(approvals_timesheets_router)
 
 @app.get("/health")
 def health_check():

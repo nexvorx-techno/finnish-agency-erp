@@ -19,6 +19,7 @@ import { InvoicesSettlementModule } from "../components/InvoicesSettlementModule
 import { WorkerOperationsModule } from "../components/WorkerOperationsModule";
 import { TeamMessagingPage } from "../components/TeamMessagingPage";
 import { SupportQueryModule } from "../components/SupportQueryModule";
+import { ApprovalsTimesheetsModule } from "../components/ApprovalsTimesheetsModule";
 import { UserProfileModal } from "../components/UserProfileModal";
 import { GlobalLoader } from "../components/GlobalLoader";
 import { GlobalFooter } from "../components/GlobalFooter";
@@ -935,6 +936,37 @@ export default function ClientPortalPage() {
                   : "m1.3_builder"
               }
               onChangeSubTab={(tab) => navigateToModule(tab)}
+            />
+          ) : activeModule.startsWith("m1.4") ? (
+            <ApprovalsTimesheetsModule
+              clientId={currentUser.clientId}
+              currentUserId={currentUser.userId}
+              userName={currentUser.fullName}
+              userRole={currentUser.role}
+              companyName={summary.client_name}
+              selectedSite={effectiveSelectedSite}
+              sites={allowedSites}
+              activeSubTab={
+                activeModule === "m1.4_overtime"
+                  ? "m1.4_overtime"
+                  : activeModule === "m1.4_timesheets"
+                  ? "m1.4_timesheets"
+                  : "m1.4_leaves"
+              }
+              onChangeSubTab={(tab) => navigateToModule(tab)}
+              onNavigateToLiveAttendance={() => navigateToModule("m1.1_live")}
+              onNavigateToInvoices={() => navigateToModule("m1.6_invoices")}
+            />
+          ) : activeModule === "m1.1_sites" ? (
+            <MasterDataModule
+              clientId={currentUser.clientId}
+              companyName={summary.client_name}
+              activeSubTab="m1.8_site_master"
+              onChangeSubTab={(tab) => navigateToModule(tab)}
+              sites={allowedSites}
+              canManageSites={isAllSitesUser}
+              onRefreshSites={fetchWorkforceData}
+              onNavigateToCreateUser={() => navigateToModule("m1.9_create_user")}
             />
           ) : activeModule.startsWith("m1.8") ? (
             <MasterDataModule
