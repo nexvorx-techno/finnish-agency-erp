@@ -11,7 +11,8 @@ SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
 SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
 SMTP_USER = os.getenv("SMTP_USER", "nexvorx@gmail.com")
 SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "xirhvtygbwwdwifv")
-EMAIL_SENDER = os.getenv("EMAIL_SENDER", SMTP_USER or "nexvorx@gmail.com")
+EMAIL_SENDER = os.getenv("EMAIL_SENDER", "no-reply@frcp.in")
+EMAIL_REPLY_TO = os.getenv("EMAIL_REPLY_TO", "no-reply@frcp.in")
 SUPPORT_INBOX = "nexvorx@gmail.com"
 PORTAL_URL = "https://clientpannel-29653.web.app"
 
@@ -29,6 +30,7 @@ def send_email_message(to_address: str, subject: str, html_body: str, text_body:
     msg["Subject"] = subject
     msg["From"] = f"Finnish Agency ERP <{EMAIL_SENDER}>"
     msg["To"] = to_address
+    msg["Reply-To"] = EMAIL_REPLY_TO
 
     msg.attach(MIMEText(text_body, "plain", "utf-8"))
     msg.attach(MIMEText(html_body, "html", "utf-8"))
