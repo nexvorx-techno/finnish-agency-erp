@@ -11,8 +11,8 @@ SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
 SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
 SMTP_USER = os.getenv("SMTP_USER", "nexvorx@gmail.com")
 SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "xirhvtygbwwdwifv")
-EMAIL_SENDER = os.getenv("EMAIL_SENDER", "no-reply@frcp.in")
-EMAIL_REPLY_TO = os.getenv("EMAIL_REPLY_TO", "no-reply@frcp.in")
+EMAIL_SENDER = os.getenv("EMAIL_SENDER", "nexvorx@gmail.com")
+EMAIL_REPLY_TO = os.getenv("EMAIL_REPLY_TO", "nexvorx@gmail.com")
 SUPPORT_INBOX = "nexvorx@gmail.com"
 PORTAL_URL = "https://clientpannel-29653.web.app"
 
