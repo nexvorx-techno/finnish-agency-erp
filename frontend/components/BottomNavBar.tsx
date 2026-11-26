@@ -321,7 +321,7 @@ export const BottomNavBar: React.FC<BottomNavBarProps> = ({
   return (
     <nav
       ref={containerRef}
-      className="hidden lg:flex fixed bottom-4 sm:bottom-6 left-1/2 -translate-x-1/2 z-40 max-w-[98vw] sm:max-w-[96vw] bg-white dark:bg-[#0f172a] border border-slate-200 dark:border-slate-800 shadow-[0_16px_50px_rgba(0,0,0,0.18)] dark:shadow-[0_16px_50px_rgba(0,0,0,0.6)] rounded-full px-3 py-2 transition-all ring-1 ring-black/5"
+      className="hidden lg:flex fixed bottom-[56px] sm:bottom-[58px] left-1/2 -translate-x-1/2 z-40 max-w-[98vw] sm:max-w-[96vw] bg-white dark:bg-[#0f172a] border border-slate-200 dark:border-slate-800 shadow-[0_16px_50px_rgba(0,0,0,0.18)] dark:shadow-[0_16px_50px_rgba(0,0,0,0.6)] rounded-full px-3 py-2 transition-all ring-1 ring-black/5"
     >
       {/* 100% Solid Floating Landscape Tiled Popover Submenu */}
       {openCategory && (
