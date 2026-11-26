@@ -315,6 +315,9 @@ class SupportTicket(Base):
     priority = Column(String(50), default="MEDIUM")  # LOW, MEDIUM, HIGH, CRITICAL
     explanation = Column(Text, nullable=False)
     status = Column(String(50), default="OPEN")  # OPEN, IN_REVIEW, RESOLVED
+    resolution_notes = Column(Text, nullable=True)
+    resolved_by = Column(String(255), nullable=True)
+    resolved_at = Column(DateTime, nullable=True)
     forwarded_to = Column(String(255), default="nexvorx@gmail.com")
     email_sent = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)

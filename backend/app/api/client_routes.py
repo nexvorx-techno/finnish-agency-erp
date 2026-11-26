@@ -10,6 +10,7 @@ from app.core.site_access import get_allowed_site_ids_for_user, assert_user_can_
 from app.core.email_service import (
     send_welcome_credentials_email,
     send_support_ticket_email,
+    send_ticket_resolved_email,
 )
 from app.models.client import (
     ClientCompany,
@@ -1077,4 +1078,124 @@ def create_support_ticket(payload: SupportTicketCreate, db: Session = Depends(ge
         "ticket_code": ticket_code,
         "id": ticket.id,
         "message": "Support ticket created and forwarded to nexvorx@gmail.com",
+    }
+
+
+@router.get("/support/tickets")
+def list_support_tickets(
+    client_id: Optional[int] = None,
+    user_id: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    """
+    Lists support tickets for tracking by user or organization.
+    """
+    query = db.query(SupportTicket)
+    if client_id:
+        query = query.filter(SupportTicket.client_id == client_id)
+    if user_id and user_id not in ["all", ""]:
+        user_str = str(user_id).strip().lower()
+        query = query.filter(
+            or_(
+                SupportTicket.user_id == str(user_id),
+                func.lower(SupportTicket.user_email) == user_str,
+            )
+        )
+    tickets = query.order_by(SupportTicket.id.desc()).all()
+    return {
+        "tickets": [
+            {
+                "id": t.id,
+                "ticket_code": t.ticket_code,
+                "client_id": t.client_id,
+                "user_id": t.user_id,
+                "user_name": t.user_name,
+                "user_email": t.user_email,
+                "user_role": t.user_role,
+                "module_issue": t.module_issue,
+                "priority": t.priority,
+                "explanation": t.explanation,
+                "status": t.status,
+                "resolution_notes": t.resolution_notes,
+                "resolved_by": t.resolved_by,
+                "resolved_at": t.resolved_at.isoformat() if t.resolved_at else None,
+                "created_at": t.created_at.isoformat() if t.created_at else None,
+            }
+            for t in tickets
+        ]
+    }
+
+
+class SupportTicketResolve(BaseModel):
+    resolution_notes: str
+    resolved_by: Optional[str] = "Nexvorx Engineering Support"
+
+
+@router.patch("/support/tickets/{ticket_code}/resolve")
+def resolve_support_ticket(
+    ticket_code: str,
+    payload: SupportTicketResolve,
+    db: Session = Depends(get_db),
+):
+    """
+    Marks a ticket as RESOLVED, automatically notifies the user via email and creates an in-app notification.
+    """
+    ticket = db.query(SupportTicket).filter(SupportTicket.ticket_code == ticket_code).first()
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Support ticket not found")
+
+    now = datetime.utcnow()
+    ticket.status = "RESOLVED"
+    ticket.resolution_notes = payload.resolution_notes.strip()
+    ticket.resolved_by = (payload.resolved_by or "Nexvorx Engineering Support").strip()
+    ticket.resolved_at = now
+    db.commit()
+    db.refresh(ticket)
+
+    # 1. Dispatch official resolution email directly to the user who reported the issue
+    try:
+        company = db.query(ClientCompany).filter(ClientCompany.id == ticket.client_id).first()
+        client_name = company.name if company else "Valmet Technologies Oy"
+        send_ticket_resolved_email({
+            "ticket_code": ticket.ticket_code,
+            "module_issue": ticket.module_issue,
+            "explanation": ticket.explanation,
+            "resolution_notes": ticket.resolution_notes,
+            "resolved_by": ticket.resolved_by,
+            "resolved_at": now.strftime("%Y-%m-%d %H:%M:%S UTC"),
+            "user_name": ticket.user_name,
+            "user_email": ticket.user_email,
+            "client_name": client_name,
+        })
+    except Exception as e:
+        print(f"[Email Notification Error] Could not send resolution email: {e}")
+
+    # 2. Insert in-app notification for the user
+    try:
+        user_rec = None
+        if ticket.user_email:
+            user_rec = db.query(ClientUser).filter(func.lower(ClientUser.email) == ticket.user_email.strip().lower()).first()
+        if not user_rec and ticket.user_id and str(ticket.user_id).isdigit():
+            user_rec = db.query(ClientUser).filter(ClientUser.id == int(ticket.user_id)).first()
+
+        notif = ClientNotification(
+            client_id=ticket.client_id or 1,
+            user_id=user_rec.id if user_rec else None,
+            title=f"✅ Support Issue Resolved (#{ticket.ticket_code})",
+            message=f"Your issue regarding '{ticket.module_issue}' has been marked resolved. Solution: {ticket.resolution_notes}",
+            notification_type="SUPPORT_TICKET",
+            target_module="support_tickets",
+            reference_id=ticket.id,
+            is_read=False,
+        )
+        db.add(notif)
+        db.commit()
+    except Exception as notif_err:
+        print(f"[In-App Notification Error] {notif_err}")
+
+    return {
+        "status": "success",
+        "message": f"Ticket {ticket.ticket_code} marked as RESOLVED. User notified via email and in-app alert.",
+        "ticket_code": ticket.ticket_code,
+        "resolved_at": ticket.resolved_at.isoformat(),
     }

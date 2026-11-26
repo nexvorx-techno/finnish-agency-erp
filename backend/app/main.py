@@ -44,6 +44,9 @@ def ensure_schema_columns() -> None:
         ("shift_change_requests", "total_approval_steps", "INTEGER DEFAULT 1"),
         ("shift_change_requests", "approval_history", "TEXT"),
         ("shift_change_requests", "created_by_user_id", "INTEGER"),
+        ("support_tickets", "resolution_notes", "TEXT"),
+        ("support_tickets", "resolved_by", "VARCHAR(255)"),
+        ("support_tickets", "resolved_at", "TIMESTAMP"),
     ]
     is_postgres = not settings.DATABASE_URL.startswith("sqlite")
     with engine.begin() as conn:

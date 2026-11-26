@@ -232,6 +232,7 @@ Finnish Agency ERP &bull; A Product of Nexvorx Technologies
         </div>
         <div class="footer">
           Forwarded automatically to <strong>{SUPPORT_INBOX}</strong><br>
+          <a href="{PORTAL_URL}/?resolve_ticket={ticket_code}" style="display:inline-block; margin-top:8px; padding:6px 14px; background:#2563eb; color:#ffffff; text-decoration:none; border-radius:6px; font-weight:bold; font-size:11px;">View & Resolve in ERP Portal</a><br><br>
           A Product of Nexvorx Technologies &bull; Trademark
         </div>
       </div>
@@ -240,3 +241,109 @@ Finnish Agency ERP &bull; A Product of Nexvorx Technologies
     """
 
     return send_email_message(SUPPORT_INBOX, subject, html_body, text_body)
+
+
+def send_ticket_resolved_email(ticket: Dict[str, Any]) -> bool:
+    """
+    Sends an automated notification to the user who raised the ticket informing them
+    that their issue has been successfully resolved.
+    """
+    to_email = ticket.get("user_email")
+    if not to_email:
+        return False
+
+    user_name = ticket.get("user_name", "Valued User")
+    ticket_code = ticket.get("ticket_code", "TICK-NEW")
+    module_issue = ticket.get("module_issue", "ERP Issue")
+    explanation = ticket.get("explanation", "")
+    resolution_notes = ticket.get("resolution_notes", "The reported issue has been diagnosed and resolved by the Nexvorx engineering desk.")
+    resolved_by = ticket.get("resolved_by", "Nexvorx Engineering Support")
+    resolved_at = ticket.get("resolved_at", "Just now")
+    client_name = ticket.get("client_name", "Valmet Technologies Oy")
+
+    subject = f"✅ [Resolved] Support Ticket #{ticket_code} — {module_issue}"
+
+    text_body = f"""Dear {user_name},
+
+Your support ticket #{ticket_code} regarding '{module_issue}' has been marked as RESOLVED.
+
+------------------------------------------------------------
+TICKET RESOLUTION DETAILS:
+------------------------------------------------------------
+Ticket Code: {ticket_code}
+Module: {module_issue}
+Client Organization: {client_name}
+Resolved At: {resolved_at}
+Resolved By: {resolved_by}
+
+Your Original Complaint / Description:
+{explanation}
+
+Resolution / Action Taken by Engineering:
+{resolution_notes}
+------------------------------------------------------------
+
+You can also view the updated status and history directly inside your Client Portal.
+
+Best regards,
+Nexvorx Technologies Support Desk
+Finnish Agency ERP
+"""
+
+    html_body = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="utf-8">
+      <style>
+        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background-color: #f8fafc; padding: 24px; margin: 0; }}
+        .card {{ max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 16px; border: 1px solid #e2e8f0; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); }}
+        .header {{ background: linear-gradient(135deg, #059669, #047857); padding: 26px 30px; color: #ffffff; }}
+        .header h1 {{ margin: 0; font-size: 19px; font-weight: 800; }}
+        .badge {{ display: inline-block; padding: 4px 10px; border-radius: 6px; font-size: 11px; font-weight: 800; text-transform: uppercase; color: #047857; background: #d1fae5; }}
+        .body {{ padding: 28px 30px; font-size: 13px; color: #334155; line-height: 1.6; }}
+        .section-title {{ font-size: 11px; font-weight: 800; text-transform: uppercase; color: #64748b; margin-top: 18px; margin-bottom: 6px; }}
+        .box {{ background: #f8fafc; border-radius: 10px; padding: 14px 18px; font-size: 12px; border: 1px solid #e2e8f0; }}
+        .row {{ display: flex; justify-content: space-between; padding: 4px 0; }}
+        .solution-box {{ background: #ecfdf5; border: 1px solid #a7f3d0; border-radius: 10px; padding: 16px; font-size: 13px; color: #065f46; white-space: pre-wrap; font-weight: 500; }}
+        .orig-box {{ background: #f1f5f9; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px 14px; font-size: 12px; color: #64748b; }}
+        .footer {{ padding: 18px 30px; background: #f8fafc; border-top: 1px solid #e2e8f0; font-size: 11px; color: #94a3b8; text-align: center; }}
+      </style>
+    </head>
+    <body>
+      <div class="card">
+        <div class="header">
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <h1>Issue Resolved</h1>
+            <span class="badge">RESOLVED</span>
+          </div>
+          <p style="margin:6px 0 0 0; font-size:12px; opacity:0.9;">Ticket #{ticket_code} &bull; {module_issue}</p>
+        </div>
+        <div class="body">
+          <p style="margin-top:0;">Dear <strong>{user_name}</strong>,</p>
+          <p>Your support ticket regarding <strong>{module_issue}</strong> has been successfully reviewed, addressed, and marked as <strong>Resolved</strong> by our engineering team.</p>
+
+          <div class="section-title">Resolution & Fix Notes</div>
+          <div class="solution-box">{resolution_notes}</div>
+
+          <div class="section-title">Ticket Information</div>
+          <div class="box">
+            <div class="row"><strong>Ticket ID:</strong> <span>{ticket_code}</span></div>
+            <div class="row"><strong>Organization:</strong> <span>{client_name}</span></div>
+            <div class="row"><strong>Resolved By:</strong> <span>{resolved_by}</span></div>
+            <div class="row"><strong>Resolved At:</strong> <span>{resolved_at}</span></div>
+          </div>
+
+          <div class="section-title">Original Issue Description</div>
+          <div class="orig-box">{explanation}</div>
+        </div>
+        <div class="footer">
+          Finnish Agency ERP &bull; A Product of <strong>Nexvorx Technologies</strong> (Trademark)<br>
+          If your issue is not fully addressed, you may submit a follow-up ticket in the portal.
+        </div>
+      </div>
+    </body>
+    </html>
+    """
+
+    return send_email_message(to_email, subject, html_body, text_body)
