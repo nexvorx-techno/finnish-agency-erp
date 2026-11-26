@@ -17,6 +17,8 @@ import {
   Coins,
   FileSpreadsheet,
   CheckCheck,
+  Download,
+  ShieldCheck,
 } from "lucide-react";
 
 export interface InvoiceItem {
@@ -156,6 +158,20 @@ export const InvoicesSettlementModule: React.FC<InvoicesSettlementModuleProps> =
 
   // Settlement confirmation feedback
   const [settlingInvoiceId, setSettlingInvoiceId] = useState<number | null>(null);
+
+  // Receive Invoice from Agency Portal (Simulation / Live Trigger)
+  const [isReceiveModalOpen, setIsReceiveModalOpen] = useState(false);
+  const [receiveForm, setReceiveForm] = useState({
+    site_id: 1,
+    billing_period_start: new Date(Date.now() - 14 * 86400000).toISOString().split("T")[0],
+    billing_period_end: new Date().toISOString().split("T")[0],
+    total_regular_hours: 160.0,
+    total_overtime_hours: 8.0,
+    hourly_rate: 27.0,
+    role: "Certified Production Operative",
+    notes: "",
+  });
+  const [isReceivingInvoice, setIsReceivingInvoice] = useState(false);
 
   // Fetch Invoices
   const fetchInvoices = useCallback(async () => {
@@ -416,6 +432,63 @@ export const InvoicesSettlementModule: React.FC<InvoicesSettlementModuleProps> =
     document.body.removeChild(link);
   };
 
+  // Handle Receiving / Simulating Agency Invoice Transmission
+  const handleReceiveFromAgency = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsReceivingInvoice(true);
+    try {
+      const regTotal = receiveForm.total_regular_hours * receiveForm.hourly_rate;
+      const otTotal = receiveForm.total_overtime_hours * (receiveForm.hourly_rate * 1.5);
+      const subtotal = Math.round((regTotal + otTotal) * 100) / 100;
+
+      const res = await fetch(`${API_BASE}/api/client/${clientId}/invoices/receive-from-agency`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          site_id: Number(receiveForm.site_id) || undefined,
+          billing_period_start: receiveForm.billing_period_start,
+          billing_period_end: receiveForm.billing_period_end,
+          total_regular_hours: receiveForm.total_regular_hours,
+          total_overtime_hours: receiveForm.total_overtime_hours,
+          subtotal_eur: subtotal,
+          alv_percentage: 25.5,
+          items_breakdown: [
+            {
+              role: receiveForm.role,
+              workers: 2,
+              hours: receiveForm.total_regular_hours,
+              rate: receiveForm.hourly_rate,
+              total: regTotal,
+            },
+            ...(receiveForm.total_overtime_hours > 0
+              ? [
+                  {
+                    role: "Approved TES 50% Overtime Premium",
+                    workers: 2,
+                    hours: receiveForm.total_overtime_hours,
+                    rate: receiveForm.hourly_rate * 1.5,
+                    total: otTotal,
+                  },
+                ]
+              : []),
+          ],
+          notes: receiveForm.notes || undefined,
+        }),
+      });
+      if (res.ok) {
+        setIsReceiveModalOpen(false);
+        await fetchInvoices();
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new CustomEvent("refresh-notifications"));
+        }
+      }
+    } catch (err) {
+      console.error("Receive invoice error:", err);
+    } finally {
+      setIsReceivingInvoice(false);
+    }
+  };
+
   const getStatusBadge = (status: InvoiceItem["client_status"]) => {
     switch (status) {
       case "PENDING_INTERNAL_APPROVAL":
@@ -468,14 +541,14 @@ export const InvoicesSettlementModule: React.FC<InvoicesSettlementModuleProps> =
           <div>
             <div className="flex items-center gap-2">
               <h1 className="text-base sm:text-lg font-bold text-[var(--text-primary)]">
-                Invoices & Settlement Hub
+                Agency Invoices & Settlement Hub
               </h1>
               <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-500/10 text-blue-600 border border-blue-500/20">
                 Finnish ALV 25.5%
               </span>
             </div>
             <p className="text-xs text-[var(--text-secondary)] mt-0.5">
-              Corporate billing for <strong className="text-[var(--text-primary)]">{companyName}</strong> &bull; Statutory Finnish B2B invoicing, sequential manager approvals & bank wire settlement
+              Incoming staffing invoices received from <strong className="text-[var(--text-primary)]">Suomen Henkilöstöpalvelu Oy (Agency Portal)</strong> for <strong className="text-[var(--text-primary)]">{companyName}</strong> &bull; Verification, internal sign-off & Accounts SEPA wire payment
             </p>
           </div>
         </div>
@@ -493,7 +566,7 @@ export const InvoicesSettlementModule: React.FC<InvoicesSettlementModuleProps> =
               }`}
             >
               <Receipt className="w-3.5 h-3.5" />
-              <span>Invoices</span>
+              <span>Received Invoices</span>
               <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-blue-500/10 text-blue-600 font-bold">
                 {invoices.length}
               </span>
@@ -509,7 +582,7 @@ export const InvoicesSettlementModule: React.FC<InvoicesSettlementModuleProps> =
               }`}
             >
               <CreditCard className="w-3.5 h-3.5" />
-              <span>Settlement Desk</span>
+              <span>Payment & Settlement Desk</span>
               {stats.inAccountsCount > 0 && (
                 <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-emerald-500/15 text-emerald-600 font-bold">
                   {stats.inAccountsCount}
@@ -527,12 +600,22 @@ export const InvoicesSettlementModule: React.FC<InvoicesSettlementModuleProps> =
               }`}
             >
               <Coins className="w-3.5 h-3.5" />
-              <span>Credit Notes</span>
+              <span>Agency Credit Notes</span>
               <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-purple-500/10 text-purple-600 font-bold">
                 {creditNotes.length}
               </span>
             </button>
           </div>
+
+          <button
+            type="button"
+            onClick={() => setIsReceiveModalOpen(true)}
+            className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
+            title="Receive / Transmit a new staffing invoice from Agency Portal"
+          >
+            <Download className="w-3.5 h-3.5" />
+            <span>Receive Agency Invoice</span>
+          </button>
 
           <button
             type="button"
@@ -595,6 +678,64 @@ export const InvoicesSettlementModule: React.FC<InvoicesSettlementModuleProps> =
           </div>
           <div className="text-[10px] text-emerald-600 mt-1 font-semibold">
             {stats.settledCount} invoice{stats.settledCount === 1 ? "" : "s"} reconciled
+          </div>
+        </div>
+      </div>
+
+      {/* 3. Statutory 2-Sided Lifecycle Banner */}
+      <div className="p-4 rounded-2xl bg-gradient-to-r from-blue-500/5 via-[var(--bg-card)] to-emerald-500/5 border border-[var(--border-color)]">
+        <div className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-secondary)] mb-2.5 flex items-center justify-between flex-wrap gap-2">
+          <div className="flex items-center gap-1.5">
+            <ShieldCheck className="w-4 h-4 text-blue-600" />
+            <span className="text-[var(--text-primary)]">2-Sided Agency Billing & Settlement Lifecycle</span>
+          </div>
+          <span className="text-[10px] text-blue-600 dark:text-blue-400 font-bold bg-blue-500/10 px-2 py-0.5 rounded-full border border-blue-500/20">
+            Agency Transmitter: Suomen Henkilöstöpalvelu Oy (Y-2839102-4)
+          </span>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
+          <div className="p-3 rounded-xl bg-[var(--bg-card)] border border-[var(--border-color)] space-y-1">
+            <div className="text-[10px] font-bold text-slate-500 uppercase flex items-center justify-between">
+              <span>Stage 1 &bull; Agency Portal</span>
+              <span className="text-[9px] text-blue-600 font-bold">Transmitter</span>
+            </div>
+            <div className="font-bold text-[var(--text-primary)]">Issued by Agency</div>
+            <p className="text-[11px] text-[var(--text-secondary)] leading-tight">
+              Agency compiles verified biometric timesheets + TES collective rates + ALV 25.5% and transmits to Client.
+            </p>
+          </div>
+
+          <div className="p-3 rounded-xl bg-[var(--bg-card)] border border-amber-500/20 bg-amber-500/5 space-y-1">
+            <div className="text-[10px] font-bold text-amber-600 uppercase flex items-center justify-between">
+              <span>Stage 2 &bull; Client Portal</span>
+              <span className="text-[9px] text-amber-600 font-bold">Verification</span>
+            </div>
+            <div className="font-bold text-[var(--text-primary)]">Internal Approval Sign-Off</div>
+            <p className="text-[11px] text-[var(--text-secondary)] leading-tight">
+              Site Manager verifies machine punches & rosters; Client Admin authorizes release to Accounts.
+            </p>
+          </div>
+
+          <div className="p-3 rounded-xl bg-[var(--bg-card)] border border-blue-500/20 bg-blue-500/5 space-y-1">
+            <div className="text-[10px] font-bold text-blue-600 uppercase flex items-center justify-between">
+              <span>Stage 3 &bull; Client Accounts</span>
+              <span className="text-[9px] text-blue-600 font-bold">Disbursement</span>
+            </div>
+            <div className="font-bold text-[var(--text-primary)]">SEPA Wire Payment</div>
+            <p className="text-[11px] text-[var(--text-secondary)] leading-tight">
+              Accounts executes bank transfer using Agency&apos;s Finnish Viitenumero and transmits wire confirmation.
+            </p>
+          </div>
+
+          <div className="p-3 rounded-xl bg-[var(--bg-card)] border border-emerald-500/20 bg-emerald-500/5 space-y-1">
+            <div className="text-[10px] font-bold text-emerald-600 uppercase flex items-center justify-between">
+              <span>Stage 4 &bull; Agency Portal</span>
+              <span className="text-[9px] text-emerald-600 font-bold">Reconciliation</span>
+            </div>
+            <div className="font-bold text-[var(--text-primary)]">Agency Settlement</div>
+            <p className="text-[11px] text-[var(--text-secondary)] leading-tight">
+              Agency bank statement clears payment and marks the billing invoice fully settled & archived.
+            </p>
           </div>
         </div>
       </div>
@@ -1848,6 +1989,209 @@ export const InvoicesSettlementModule: React.FC<InvoicesSettlementModuleProps> =
                     <>
                       <Check className="w-3.5 h-3.5" />
                       <span>Issue & Apply Credit Note</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+      {/* 8. MODAL: RECEIVE INVOICE FROM AGENCY PORTAL */}
+      {isReceiveModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs animate-in fade-in">
+          <div className="w-full max-w-lg rounded-2xl bg-[var(--bg-card)] border border-[var(--border-color)] shadow-2xl overflow-hidden">
+            <div className="p-4 border-b border-[var(--border-color)] bg-gradient-to-r from-blue-600/10 via-indigo-600/5 to-transparent flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl bg-blue-600 text-white flex items-center justify-center shadow-xs">
+                  <Download className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-[var(--text-primary)]">
+                    Receive Invoice from Agency Portal
+                  </h3>
+                  <p className="text-[11px] text-[var(--text-secondary)]">
+                    Simulates Suomen Henkilöstöpalvelu Oy transmitting verified biometric billing
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsReceiveModalOpen(false)}
+                className="text-[var(--text-secondary)] hover:text-[var(--text-primary)] cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleReceiveFromAgency} className="p-4 space-y-3.5">
+              <div className="p-3 rounded-xl bg-blue-500/10 border border-blue-500/20 text-xs space-y-1">
+                <div className="font-bold text-blue-700 dark:text-blue-300 flex items-center gap-1.5">
+                  <ShieldCheck className="w-3.5 h-3.5" />
+                  <span>Two-Sided Agency Transmission</span>
+                </div>
+                <p className="text-[11px] text-[var(--text-secondary)] leading-relaxed">
+                  The invoice will be received by <strong>{companyName}</strong> in status <code className="px-1 py-0.5 rounded bg-amber-500/15 text-amber-600 font-bold">Awaiting Internal Approval</code>. An instant notification will be delivered to the Level 1 Approver.
+                </p>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-semibold text-[var(--text-primary)] block mb-1">
+                    Staffing Role / Trade *
+                  </label>
+                  <select
+                    value={receiveForm.role}
+                    onChange={(e) => setReceiveForm((prev) => ({ ...prev, role: e.target.value }))}
+                    className="w-full px-3 py-1.5 rounded-lg bg-[var(--bg-secondary)] border border-[var(--border-color)] text-xs text-[var(--text-primary)]"
+                  >
+                    <option value="Certified CNC Machinist (Fanuc)">CNC Machinist (Fanuc)</option>
+                    <option value="MIG/MAG Welder (ISO 9606-1)">MIG/MAG Welder (ISO 9606-1)</option>
+                    <option value="Production Line Operative">Production Line Operative</option>
+                    <option value="Heavy Industrial Assembler">Heavy Industrial Assembler</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-xs font-semibold text-[var(--text-primary)] block mb-1">
+                    Agreed TES Rate (€/h) *
+                  </label>
+                  <input
+                    type="number"
+                    step="0.50"
+                    value={receiveForm.hourly_rate}
+                    onChange={(e) =>
+                      setReceiveForm((prev) => ({ ...prev, hourly_rate: parseFloat(e.target.value) || 0 }))
+                    }
+                    className="w-full px-3 py-1.5 rounded-lg bg-[var(--bg-secondary)] border border-[var(--border-color)] text-xs font-bold text-[var(--text-primary)]"
+                    required
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-semibold text-[var(--text-primary)] block mb-1">
+                    Billing Period Start *
+                  </label>
+                  <input
+                    type="date"
+                    value={receiveForm.billing_period_start}
+                    onChange={(e) => setReceiveForm((prev) => ({ ...prev, billing_period_start: e.target.value }))}
+                    className="w-full px-3 py-1.5 rounded-lg bg-[var(--bg-secondary)] border border-[var(--border-color)] text-xs text-[var(--text-primary)]"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs font-semibold text-[var(--text-primary)] block mb-1">
+                    Billing Period End *
+                  </label>
+                  <input
+                    type="date"
+                    value={receiveForm.billing_period_end}
+                    onChange={(e) => setReceiveForm((prev) => ({ ...prev, billing_period_end: e.target.value }))}
+                    className="w-full px-3 py-1.5 rounded-lg bg-[var(--bg-secondary)] border border-[var(--border-color)] text-xs text-[var(--text-primary)]"
+                    required
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-semibold text-[var(--text-primary)] block mb-1">
+                    Biometric Regular Hours *
+                  </label>
+                  <input
+                    type="number"
+                    step="1"
+                    value={receiveForm.total_regular_hours}
+                    onChange={(e) =>
+                      setReceiveForm((prev) => ({ ...prev, total_regular_hours: parseFloat(e.target.value) || 0 }))
+                    }
+                    className="w-full px-3 py-1.5 rounded-lg bg-[var(--bg-secondary)] border border-[var(--border-color)] text-xs font-bold text-[var(--text-primary)]"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs font-semibold text-[var(--text-primary)] block mb-1">
+                    Approved Overtime Hours (TES +50%)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.5"
+                    value={receiveForm.total_overtime_hours}
+                    onChange={(e) =>
+                      setReceiveForm((prev) => ({ ...prev, total_overtime_hours: parseFloat(e.target.value) || 0 }))
+                    }
+                    className="w-full px-3 py-1.5 rounded-lg bg-[var(--bg-secondary)] border border-[var(--border-color)] text-xs font-bold text-[var(--text-primary)]"
+                  />
+                </div>
+              </div>
+
+              {/* Total Calculation Preview */}
+              <div className="p-3 rounded-xl bg-[var(--bg-secondary)] border border-[var(--border-color)] space-y-1 text-xs">
+                {(() => {
+                  const reg = receiveForm.total_regular_hours * receiveForm.hourly_rate;
+                  const ot = receiveForm.total_overtime_hours * (receiveForm.hourly_rate * 1.5);
+                  const sub = Math.round((reg + ot) * 100) / 100;
+                  const vat = Math.round(sub * 0.255 * 100) / 100;
+                  const gross = Math.round((sub + vat) * 100) / 100;
+                  return (
+                    <>
+                      <div className="flex justify-between text-[var(--text-secondary)]">
+                        <span>Net Staffing Subtotal:</span>
+                        <span className="font-semibold text-[var(--text-primary)]">€{sub.toFixed(2)}</span>
+                      </div>
+                      <div className="flex justify-between text-[var(--text-secondary)]">
+                        <span>Finnish ALV 25.5%:</span>
+                        <span className="font-semibold text-[var(--text-primary)]">€{vat.toFixed(2)}</span>
+                      </div>
+                      <div className="pt-1 border-t border-[var(--border-color)] flex justify-between text-sm font-bold text-[var(--text-primary)]">
+                        <span>Gross Invoiced Payable:</span>
+                        <span className="text-blue-600 dark:text-blue-400">€{gross.toFixed(2)}</span>
+                      </div>
+                    </>
+                  );
+                })()}
+              </div>
+
+              <div>
+                <label className="text-xs font-semibold text-[var(--text-primary)] block mb-1">
+                  Agency Billing Note (Optional)
+                </label>
+                <input
+                  type="text"
+                  value={receiveForm.notes}
+                  onChange={(e) => setReceiveForm((prev) => ({ ...prev, notes: e.target.value }))}
+                  placeholder="e.g. Biometric timesheet export from Tampere Plant Turnstile #2"
+                  className="w-full px-3 py-1.5 rounded-lg bg-[var(--bg-secondary)] border border-[var(--border-color)] text-xs text-[var(--text-primary)]"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-[var(--border-color)]">
+                <button
+                  type="button"
+                  onClick={() => setIsReceiveModalOpen(false)}
+                  className="px-3 py-1.5 rounded-lg border border-[var(--border-color)] text-xs font-semibold text-[var(--text-secondary)] cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isReceivingInvoice}
+                  className="px-4 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold cursor-pointer disabled:opacity-60 flex items-center gap-1.5 shadow-sm"
+                >
+                  {isReceivingInvoice ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      <span>Transmitting...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Download className="w-3.5 h-3.5" />
+                      <span>Transmit Invoice to Client</span>
                     </>
                   )}
                 </button>

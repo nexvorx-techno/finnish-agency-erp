@@ -9,8 +9,9 @@ from app.core.site_access import get_allowed_site_ids_for_user, assert_user_can_
 from app.core.approval_engine import (
     execute_sequential_approval_step,
     get_approval_step_metadata,
+    create_short_notification,
 )
-from app.models.client import ClientInvoice, ClientCompany, ClientSite, ClientApprovalFlow, ClientCreditNote
+from app.models.client import ClientInvoice, ClientCompany, ClientSite, ClientApprovalFlow, ClientCreditNote, ClientUser
 
 router = APIRouter(prefix="/api/client", tags=["Client Invoices & Settlement"])
 
@@ -37,17 +38,136 @@ class CreditNoteCreateSchema(BaseModel):
     subtotal_eur: float
     notes: Optional[str] = None
 
-class InvoiceCreateDemoSchema(BaseModel):
-    client_id: int
+class AgencyIssueInvoiceSchema(BaseModel):
     site_id: Optional[int] = None
-    invoice_number: str
-    billing_period_start: str
-    billing_period_end: str
-    total_regular_hours: float
-    total_overtime_hours: float
-    subtotal_eur: float
+    billing_period_start: Optional[str] = None
+    billing_period_end: Optional[str] = None
+    total_regular_hours: float = 160.0
+    total_overtime_hours: float = 0.0
+    subtotal_eur: float = 4320.0
     alv_percentage: float = 25.5
+    items_breakdown: Optional[List[dict]] = None
     notes: Optional[str] = None
+
+
+@router.post("/{client_id}/invoices/receive-from-agency")
+def receive_invoice_from_agency(
+    client_id: int,
+    payload: AgencyIssueInvoiceSchema,
+    db: Session = Depends(get_db)
+):
+    """
+    Simulates / handles the Agency Portal issuing and transmitting a new staffing invoice
+    to the Client Portal for internal approval & SEPA payment settlement.
+    - Status set to PENDING_INTERNAL_APPROVAL
+    - Sequential approval steps initialized according to Client's approval flow (m1.6_invoices)
+    - Instant short notification dispatched to Level 1 Approver
+    """
+    count = db.query(ClientInvoice).filter(ClientInvoice.client_id == client_id).count()
+    inv_num = f"INV-2026-{count + 41:04d}"
+
+    subtotal = payload.subtotal_eur
+    alv_amt = round(subtotal * (payload.alv_percentage / 100.0), 2)
+    total_amt = round(subtotal + alv_amt, 2)
+
+    today = date.today()
+    due_date = today + timedelta(days=14)
+
+    try:
+        start_date = datetime.strptime(payload.billing_period_start, "%Y-%m-%d").date() if payload.billing_period_start else today - timedelta(days=14)
+        end_date = datetime.strptime(payload.billing_period_end, "%Y-%m-%d").date() if payload.billing_period_end else today
+    except Exception:
+        start_date = today - timedelta(days=14)
+        end_date = today
+
+    # Determine site
+    site = None
+    if payload.site_id:
+        site = db.query(ClientSite).filter(ClientSite.id == payload.site_id).first()
+    if not site:
+        site = db.query(ClientSite).filter(ClientSite.client_id == client_id).first()
+    site_id = site.id if site else None
+
+    # Get approval metadata for m1.6_invoices
+    step_meta = get_approval_step_metadata(
+        db=db,
+        client_id=client_id,
+        flow_key="m1.6_invoices",
+        current_step=1,
+        total_steps=1,
+        is_pending=True,
+    )
+
+    items_json = json.dumps(payload.items_breakdown) if payload.items_breakdown else json.dumps([
+        {"role": "Certified CNC Machinist (Fanuc)", "workers": 2, "hours": payload.total_regular_hours / 2, "rate": 27.00, "total": (payload.total_regular_hours / 2) * 27.00},
+        {"role": "ISO 9606-1 Certified Welder", "workers": 2, "hours": payload.total_regular_hours / 2, "rate": 27.00, "total": (payload.total_regular_hours / 2) * 27.00},
+    ])
+
+    now_iso = datetime.utcnow().isoformat()
+    history = [
+        {
+            "step": 0,
+            "action": "AGENCY_ISSUED",
+            "approver_name": "Agency Billing Manager (Suomen Henkilöstöpalvelu Oy)",
+            "role": "AGENCY_ADMIN",
+            "timestamp": now_iso,
+            "notes": "Staffing invoice issued from verified biometric timesheets & transmitted to Client Portal for review and internal approval",
+        }
+    ]
+
+    new_inv = ClientInvoice(
+        invoice_number=inv_num,
+        client_id=client_id,
+        site_id=site_id,
+        billing_period_start=start_date,
+        billing_period_end=end_date,
+        issue_date=today,
+        due_date=due_date,
+        total_regular_hours=payload.total_regular_hours,
+        total_overtime_hours=payload.total_overtime_hours,
+        subtotal_eur=subtotal,
+        alv_percentage=payload.alv_percentage,
+        alv_amount_eur=alv_amt,
+        total_amount_eur=total_amt,
+        currency="EUR",
+        agency_approval_status="APPROVED",
+        client_status="PENDING_INTERNAL_APPROVAL",
+        current_approval_step=1,
+        total_approval_steps=step_meta["total_approval_steps"],
+        approval_history=json.dumps(history),
+        items_breakdown_json=items_json,
+        notes=payload.notes or f"Biometric timesheet billing for {site.site_name if site else 'Plant Site'} (Period: {start_date} to {end_date})",
+    )
+    db.add(new_inv)
+    db.commit()
+    db.refresh(new_inv)
+
+    # Dispatch notification to Level 1 Approver
+    l1_approver_id = step_meta.get("current_approver_id")
+    if not l1_approver_id:
+        first_user = db.query(ClientUser).filter(ClientUser.client_id == client_id).first()
+        l1_approver_id = first_user.id if first_user else None
+
+    if l1_approver_id:
+        create_short_notification(
+            db=db,
+            client_id=client_id,
+            recipient_user_id=l1_approver_id,
+            short_text=f"New agency invoice {inv_num} received (€{total_amt:,.2f}). Step 1 approval required.",
+            target_module="m1.6_invoices",
+            reference_id=new_inv.id,
+            approver_level="Level 1",
+        )
+        db.commit()
+
+    return {
+        "message": f"Invoice {inv_num} transmitted to Client Portal from Agency Portal",
+        "invoice_number": inv_num,
+        "id": new_inv.id,
+        "total_amount_eur": total_amt,
+        "client_status": new_inv.client_status,
+        "approver_id": l1_approver_id,
+    }
 
 
 @router.get("/{client_id}/invoices")
