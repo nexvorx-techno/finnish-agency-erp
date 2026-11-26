@@ -8,7 +8,6 @@ import {
   CheckCircle2,
   Search,
   RefreshCw,
-  Plus,
   FileText,
   FileCheck,
   ShieldAlert,
@@ -33,7 +32,7 @@ interface ApprovalsTimesheetsModuleProps {
   userRole: string;
   companyName: string;
   selectedSite: string;
-  sites: SiteOption[];
+  sites?: SiteOption[];
   activeSubTab: ApprovalsSubTab;
   onChangeSubTab: (tab: ApprovalsSubTab) => void;
   onNavigateToLiveAttendance?: () => void;
@@ -137,7 +136,6 @@ export const ApprovalsTimesheetsModule: React.FC<ApprovalsTimesheetsModuleProps>
   userRole,
   companyName,
   selectedSite,
-  sites,
   activeSubTab,
   onChangeSubTab,
 }) => {
@@ -148,21 +146,9 @@ export const ApprovalsTimesheetsModule: React.FC<ApprovalsTimesheetsModuleProps>
 
   // Leave State
   const [leaves, setLeaves] = useState<LeaveRecord[]>([]);
-  const [isNewLeaveModalOpen, setIsNewLeaveModalOpen] = useState(false);
-  const [newLeaveWorker, setNewLeaveWorker] = useState("Antti Korhonen");
-  const [newLeaveType, setNewLeaveType] = useState("SICK_LEAVE");
-  const [newLeaveStartDate, setNewLeaveStartDate] = useState(new Date().toISOString().split("T")[0]);
-  const [newLeaveDays, setNewLeaveDays] = useState(2);
-  const [newLeaveReason, setNewLeaveReason] = useState("");
-  const [newLeaveCertUrl, setNewLeaveCertUrl] = useState("");
 
   // Overtime State
   const [overtimes, setOvertimes] = useState<OvertimeRecord[]>([]);
-  const [isNewOtModalOpen, setIsNewOtModalOpen] = useState(false);
-  const [newOtWorker, setNewOtWorker] = useState("Juha Laine");
-  const [newOtHours, setNewOtHours] = useState(2.5);
-  const [newOtShift, setNewOtShift] = useState("Morning Shift (06:00–14:30)");
-  const [newOtReason, setNewOtReason] = useState("");
 
   // Timesheets State
   const [batches, setBatches] = useState<TimesheetBatchRecord[]>([]);
@@ -307,69 +293,6 @@ export const ApprovalsTimesheetsModule: React.FC<ApprovalsTimesheetsModuleProps>
         setIsSignOffModalOpen(false);
         setSignOffNotes("");
         await fetchBatches();
-      }
-    } catch {}
-    setIsActionSubmitting(false);
-  };
-
-  // Submit New Leave
-  const handleCreateLeave = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsActionSubmitting(true);
-    try {
-      const effectiveSite = sites.length > 0 ? sites[0].id : 1;
-      const res = await fetch(`${API_BASE}/api/client/${clientId}/approvals/leaves`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          site_id: activeSiteId !== "all" ? Number(activeSiteId) : effectiveSite,
-          worker_id: 101,
-          worker_name: newLeaveWorker,
-          role_title: "Plant Operator",
-          leave_type: newLeaveType,
-          start_date: newLeaveStartDate,
-          end_date: newLeaveStartDate,
-          total_days: Number(newLeaveDays) || 1,
-          reason: newLeaveReason || "Statutory leave application logged in ERP",
-          doctor_certificate_url: newLeaveCertUrl || null,
-          created_by_user_id: currentUserId,
-        }),
-      });
-      if (res.ok) {
-        setIsNewLeaveModalOpen(false);
-        setNewLeaveReason("");
-        setNewLeaveCertUrl("");
-        await fetchLeaves();
-      }
-    } catch {}
-    setIsActionSubmitting(false);
-  };
-
-  // Submit New Overtime
-  const handleCreateOvertime = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsActionSubmitting(true);
-    try {
-      const effectiveSite = sites.length > 0 ? sites[0].id : 1;
-      const res = await fetch(`${API_BASE}/api/client/${clientId}/approvals/overtime`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          site_id: activeSiteId !== "all" ? Number(activeSiteId) : effectiveSite,
-          worker_id: 104,
-          worker_name: newOtWorker,
-          role_title: "Plant Technician",
-          shift_date: new Date().toISOString().split("T")[0],
-          planned_shift: newOtShift,
-          overtime_hours: Number(newOtHours) || 2.0,
-          justification_reason: newOtReason || "Plant emergency maintenance run",
-          created_by_user_id: currentUserId,
-        }),
-      });
-      if (res.ok) {
-        setIsNewOtModalOpen(false);
-        setNewOtReason("");
-        await fetchOvertimes();
       }
     } catch {}
     setIsActionSubmitting(false);
@@ -550,14 +473,6 @@ export const ApprovalsTimesheetsModule: React.FC<ApprovalsTimesheetsModuleProps>
               >
                 <RefreshCw className="w-3.5 h-3.5" />
               </button>
-              <button
-                type="button"
-                onClick={() => setIsNewLeaveModalOpen(true)}
-                className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold transition-all shadow-xs"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                <span>Log Leave Request</span>
-              </button>
             </div>
           </div>
 
@@ -710,18 +625,18 @@ export const ApprovalsTimesheetsModule: React.FC<ApprovalsTimesheetsModuleProps>
                   Finnish Statutory Overtime Engine (Työaikalaki & TES §18)
                 </h4>
                 <p className="text-[11px] text-[var(--text-secondary)]">
-                  First 2 extra daily hours are compensated at +50% surcharge. Subsequent extra hours are compensated at +100%.
+                  Incoming overtime authorizations: First 2 daily hours at +50% surcharge, subsequent extra hours at +100%. Review and approve/decline below.
                 </p>
               </div>
             </div>
 
             <button
               type="button"
-              onClick={() => setIsNewOtModalOpen(true)}
-              className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold transition-all shadow-xs shrink-0"
+              onClick={() => fetchOvertimes()}
+              className="p-2 rounded-xl bg-[var(--bg-card)] hover:bg-[var(--bg-secondary)] border border-[var(--border-color)] text-slate-500 transition-colors shrink-0"
+              title="Refresh overtime requests"
             >
-              <Plus className="w-3.5 h-3.5" />
-              <span>Log Overtime Request</span>
+              <RefreshCw className="w-3.5 h-3.5" />
             </button>
           </div>
 
@@ -974,210 +889,6 @@ export const ApprovalsTimesheetsModule: React.FC<ApprovalsTimesheetsModuleProps>
                 </tbody>
               </table>
             </div>
-          </div>
-        </div>
-      )}
-
-      {/* =====================================================================
-          MODAL: SUBMIT NEW LEAVE REQUEST
-          ===================================================================== */}
-      {isNewLeaveModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-150">
-          <div className="w-full max-w-lg rounded-3xl bg-[var(--bg-card)] border border-[var(--border-color)] p-6 shadow-2xl space-y-4">
-            <div className="flex items-center justify-between pb-3 border-b border-[var(--border-color)]">
-              <h3 className="text-sm font-bold text-[var(--text-primary)]">Log Leave Application</h3>
-              <button
-                type="button"
-                onClick={() => setIsNewLeaveModalOpen(false)}
-                className="w-7 h-7 rounded-lg text-slate-400 hover:text-slate-700 flex items-center justify-center"
-              >
-                ✕
-              </button>
-            </div>
-
-            <form onSubmit={handleCreateLeave} className="space-y-3.5 text-xs">
-              <div>
-                <label className="block font-bold text-[var(--text-secondary)] mb-1">Worker Name</label>
-                <input
-                  type="text"
-                  required
-                  value={newLeaveWorker}
-                  onChange={(e) => setNewLeaveWorker(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl bg-[var(--bg-secondary)] border border-[var(--border-color)] text-[var(--text-primary)] focus:outline-none"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block font-bold text-[var(--text-secondary)] mb-1">Leave Type</label>
-                  <select
-                    value={newLeaveType}
-                    onChange={(e) => setNewLeaveType(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl bg-[var(--bg-secondary)] border border-[var(--border-color)] text-[var(--text-primary)] focus:outline-none font-medium"
-                  >
-                    <option value="SICK_LEAVE">Sairausloma (Paid Sick Leave)</option>
-                    <option value="ANNUAL_VACATION">Vuosiloma (Annual Vacation)</option>
-                    <option value="UNPAID_LEAVE">Unpaid Leave</option>
-                    <option value="PARENTAL_LEAVE">Parental Leave</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block font-bold text-[var(--text-secondary)] mb-1">Total Days</label>
-                  <input
-                    type="number"
-                    min={1}
-                    max={30}
-                    value={newLeaveDays}
-                    onChange={(e) => setNewLeaveDays(Number(e.target.value))}
-                    className="w-full px-3 py-2 rounded-xl bg-[var(--bg-secondary)] border border-[var(--border-color)] text-[var(--text-primary)] focus:outline-none"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block font-bold text-[var(--text-secondary)] mb-1">Start Date</label>
-                <input
-                  type="date"
-                  required
-                  value={newLeaveStartDate}
-                  onChange={(e) => setNewLeaveStartDate(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl bg-[var(--bg-secondary)] border border-[var(--border-color)] text-[var(--text-primary)] focus:outline-none"
-                />
-              </div>
-
-              <div>
-                <label className="block font-bold text-[var(--text-secondary)] mb-1">Reason & Operational Notes</label>
-                <textarea
-                  rows={2}
-                  required
-                  placeholder="Specify reason or doctor notes..."
-                  value={newLeaveReason}
-                  onChange={(e) => setNewLeaveReason(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl bg-[var(--bg-secondary)] border border-[var(--border-color)] text-[var(--text-primary)] focus:outline-none resize-none"
-                />
-              </div>
-
-              {newLeaveType === "SICK_LEAVE" && (
-                <div>
-                  <label className="block font-bold text-[var(--text-secondary)] mb-1">Medical Certificate Document URL (Optional)</label>
-                  <input
-                    type="url"
-                    placeholder="https://terveystalo.fi/todistus/A-..."
-                    value={newLeaveCertUrl}
-                    onChange={(e) => setNewLeaveCertUrl(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl bg-[var(--bg-secondary)] border border-[var(--border-color)] text-[var(--text-primary)] focus:outline-none"
-                  />
-                </div>
-              )}
-
-              <div className="flex justify-end gap-2.5 pt-3 border-t border-[var(--border-color)]">
-                <button
-                  type="button"
-                  onClick={() => setIsNewLeaveModalOpen(false)}
-                  className="px-4 py-2 rounded-xl bg-[var(--bg-secondary)] text-[var(--text-secondary)] font-bold"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={isActionSubmitting}
-                  className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold transition-all shadow-xs"
-                >
-                  Submit Application
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* =====================================================================
-          MODAL: SUBMIT NEW OVERTIME REQUEST
-          ===================================================================== */}
-      {isNewOtModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-150">
-          <div className="w-full max-w-lg rounded-3xl bg-[var(--bg-card)] border border-[var(--border-color)] p-6 shadow-2xl space-y-4">
-            <div className="flex items-center justify-between pb-3 border-b border-[var(--border-color)]">
-              <h3 className="text-sm font-bold text-[var(--text-primary)]">Authorize Plant Overtime</h3>
-              <button
-                type="button"
-                onClick={() => setIsNewOtModalOpen(false)}
-                className="w-7 h-7 rounded-lg text-slate-400 hover:text-slate-700 flex items-center justify-center"
-              >
-                ✕
-              </button>
-            </div>
-
-            <form onSubmit={handleCreateOvertime} className="space-y-3.5 text-xs">
-              <div>
-                <label className="block font-bold text-[var(--text-secondary)] mb-1">Operator Name</label>
-                <input
-                  type="text"
-                  required
-                  value={newOtWorker}
-                  onChange={(e) => setNewOtWorker(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl bg-[var(--bg-secondary)] border border-[var(--border-color)] text-[var(--text-primary)] focus:outline-none"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block font-bold text-[var(--text-secondary)] mb-1">Overtime Hours</label>
-                  <input
-                    type="number"
-                    step="0.5"
-                    min="0.5"
-                    max="12"
-                    required
-                    value={newOtHours}
-                    onChange={(e) => setNewOtHours(Number(e.target.value))}
-                    className="w-full px-3 py-2 rounded-xl bg-[var(--bg-secondary)] border border-[var(--border-color)] text-[var(--text-primary)] focus:outline-none font-bold"
-                  />
-                </div>
-                <div>
-                  <label className="block font-bold text-[var(--text-secondary)] mb-1">Shift Context</label>
-                  <select
-                    value={newOtShift}
-                    onChange={(e) => setNewOtShift(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl bg-[var(--bg-secondary)] border border-[var(--border-color)] text-[var(--text-primary)] focus:outline-none"
-                  >
-                    <option value="Morning Shift (06:00–14:30)">Morning Shift</option>
-                    <option value="Evening Shift (14:00–22:30)">Evening Shift</option>
-                    <option value="Night Shift (22:00–06:30)">Night Shift</option>
-                    <option value="Weekend Run (Saturday/Sunday)">Weekend Run</option>
-                  </select>
-                </div>
-              </div>
-
-              <div>
-                <label className="block font-bold text-[var(--text-secondary)] mb-1">Operational Justification</label>
-                <textarea
-                  rows={2}
-                  required
-                  placeholder="Specify machine breakdown, emergency shipment, or line cover..."
-                  value={newOtReason}
-                  onChange={(e) => setNewOtReason(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl bg-[var(--bg-secondary)] border border-[var(--border-color)] text-[var(--text-primary)] focus:outline-none resize-none"
-                />
-              </div>
-
-              <div className="flex justify-end gap-2.5 pt-3 border-t border-[var(--border-color)]">
-                <button
-                  type="button"
-                  onClick={() => setIsNewOtModalOpen(false)}
-                  className="px-4 py-2 rounded-xl bg-[var(--bg-secondary)] text-[var(--text-secondary)] font-bold"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={isActionSubmitting}
-                  className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold transition-all shadow-xs"
-                >
-                  Log & Authorize
-                </button>
-              </div>
-            </form>
           </div>
         </div>
       )}
