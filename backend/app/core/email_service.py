@@ -9,9 +9,9 @@ logger = logging.getLogger(__name__)
 
 SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
 SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
-SMTP_USER = os.getenv("SMTP_USER", "")
-SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
-EMAIL_SENDER = os.getenv("EMAIL_SENDER", SMTP_USER or "noreply@nexvorx.com")
+SMTP_USER = os.getenv("SMTP_USER", "nexvorx@gmail.com")
+SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "xirhvtygbwwdwifv")
+EMAIL_SENDER = os.getenv("EMAIL_SENDER", SMTP_USER or "nexvorx@gmail.com")
 SUPPORT_INBOX = "nexvorx@gmail.com"
 PORTAL_URL = "https://clientpannel-29653.web.app"
 
@@ -34,11 +34,12 @@ def send_email_message(to_address: str, subject: str, html_body: str, text_body:
     msg.attach(MIMEText(html_body, "html", "utf-8"))
 
     if SMTP_USER and SMTP_PASSWORD:
+        pwd_clean = SMTP_PASSWORD.replace(" ", "").strip()
         try:
-            with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=10) as server:
+            with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=15) as server:
                 server.starttls()
-                server.login(SMTP_USER, SMTP_PASSWORD)
-                server.sendmail(EMAIL_SENDER, [to_address], msg.as_string())
+                server.login(SMTP_USER.strip(), pwd_clean)
+                server.sendmail(EMAIL_SENDER.strip(), [to_address.strip()], msg.as_string())
             logger.info(f"[EmailService] Live email successfully sent to {to_address} (Subject: {subject})")
             return True
         except Exception as e:
