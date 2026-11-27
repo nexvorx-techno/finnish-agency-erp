@@ -366,8 +366,12 @@ export const ClientSidebar: React.FC<ClientSidebarProps> = ({
         {/* Main Logo & Platform Label */}
         <div className="px-5 py-4 border-b border-[var(--border-color)] shrink-0">
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-blue-600 to-indigo-700 text-white flex items-center justify-center font-black text-base shadow-sm">
-              R
+            <div className="w-10 h-10 rounded-xl bg-white border border-[var(--border-color)] p-1 flex items-center justify-center shrink-0 shadow-sm">
+              <img
+                src="/icons/icon-192.png"
+                alt="RekrySilta Logo"
+                className="max-h-full max-w-full object-contain"
+              />
             </div>
             <div>
               <div className="text-sm font-bold tracking-tight text-[var(--text-primary)]">

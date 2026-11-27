@@ -327,8 +327,12 @@ export const ClientLogin: React.FC<ClientLoginProps> = ({
         {/* Center Login Box */}
         <div className="w-full max-w-md mx-auto my-auto py-8">
           <div className="text-center mb-6">
-            <div className="inline-flex p-3 rounded-2xl bg-[var(--accent-light)] text-[var(--accent-color)] mb-3 shadow-inner">
-              {loginMode === "pin" ? <KeyRound className="w-7 h-7" /> : <Building2 className="w-7 h-7" />}
+            <div className="flex justify-center mb-3">
+              <img
+                src="/rekrysilta-logo.png"
+                alt="RekrySilta Logo"
+                className="h-16 w-auto object-contain drop-shadow-sm"
+              />
             </div>
             <h2 className="text-2xl font-black text-[var(--text-primary)] tracking-tight">
               {loginMode === "pin" ? "Quick PIN Sign-In" : "Client Portal Sign-In"}
