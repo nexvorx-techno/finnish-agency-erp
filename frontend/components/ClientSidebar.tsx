@@ -366,18 +366,22 @@ export const ClientSidebar: React.FC<ClientSidebarProps> = ({
         {/* Main Logo & Platform Label */}
         <div className="px-5 py-4 border-b border-[var(--border-color)] shrink-0">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-white border border-[var(--border-color)] p-1 flex items-center justify-center shrink-0 shadow-sm">
+            <div className="w-10 h-10 rounded-xl overflow-hidden flex items-center justify-center shrink-0 shadow-md ring-1 ring-blue-500/20">
               <img
-                src="/icons/icon-192.png"
-                alt="RekrySilta Logo"
-                className="max-h-full max-w-full object-contain"
+                src="/icons/icon-192.png?v=2"
+                alt="RekrySilta Icon"
+                className="w-full h-full object-cover"
               />
             </div>
             <div>
-              <div className="text-sm font-bold tracking-tight text-[var(--text-primary)]">
-                RekrySilta ERP
+              <div className="text-base font-black tracking-tight leading-none flex items-center">
+                <span className="text-[var(--text-primary)]">Rekry</span>
+                <span className="text-blue-600 dark:text-sky-400">Silta</span>
+                <span className="ml-1.5 text-[10px] font-extrabold uppercase tracking-wider px-1.5 py-0.5 rounded-md bg-blue-500/10 text-blue-600 dark:text-sky-400 border border-blue-500/20">
+                  ERP
+                </span>
               </div>
-              <div className="text-[11px] font-medium text-[var(--text-secondary)]">
+              <div className="text-[11px] font-medium text-[var(--text-secondary)] mt-1">
                 Client Workspace
               </div>
             </div>

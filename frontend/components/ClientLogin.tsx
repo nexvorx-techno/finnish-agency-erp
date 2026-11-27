@@ -327,11 +327,11 @@ export const ClientLogin: React.FC<ClientLoginProps> = ({
         {/* Center Login Box */}
         <div className="w-full max-w-md mx-auto my-auto py-8">
           <div className="text-center mb-6">
-            <div className="flex justify-center mb-3">
+            <div className="flex justify-center mb-4">
               <img
-                src="/rekrysilta-logo.png"
+                src="/rekrysilta-logo.png?v=2"
                 alt="RekrySilta Logo"
-                className="h-16 w-auto object-contain drop-shadow-sm"
+                className="h-24 sm:h-28 w-auto object-contain drop-shadow-md transition-transform duration-300 hover:scale-105"
               />
             </div>
             <h2 className="text-2xl font-black text-[var(--text-primary)] tracking-tight">
