@@ -521,7 +521,7 @@ export const ClientLogin: React.FC<ClientLoginProps> = ({
         {/* Bottom Security Footer */}
         <div className="text-center text-[10px] text-[var(--text-secondary)] pt-4 border-t border-[var(--border-color)] flex items-center justify-center gap-2">
           <ShieldCheck className="w-4 h-4 text-emerald-600" />
-          <span>SuomiStaff ERP • Encrypted TLS Session • Työaikalaki & ALV 25.5% Compliant</span>
+          <span>RekrySilta ERP • Encrypted TLS Session • Työaikalaki & ALV 25.5% Compliant</span>
         </div>
       </div>
     </div>

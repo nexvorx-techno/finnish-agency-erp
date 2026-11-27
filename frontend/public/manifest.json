@@ -1,6 +1,6 @@
 {
-  "name": "Finnish Agency ERP — Client Portal",
-  "short_name": "Agency ERP",
+  "name": "RekrySilta ERP — Client Portal",
+  "short_name": "RekrySilta",
   "description": "Enterprise Henkilöstövuokraus Management System — Client Portal",
   "start_url": "/",
   "scope": "/",

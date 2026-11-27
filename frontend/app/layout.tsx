@@ -3,13 +3,13 @@ import "./globals.css";
 import { PwaManager } from "../components/PwaManager";
 
 export const metadata: Metadata = {
-  title: "Finnish Agency ERP | Client Portal",
+  title: "RekrySilta ERP | Client Portal",
   description: "Enterprise Henkilöstövuokraus Management System - Client Portal",
   manifest: "/manifest.json",
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
-    title: "Agency ERP",
+    title: "RekrySilta",
   },
   icons: {
     icon: "/icons/icon-192.png",

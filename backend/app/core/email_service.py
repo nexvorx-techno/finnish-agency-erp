@@ -28,7 +28,7 @@ def send_email_message(to_address: str, subject: str, html_body: str, text_body:
 
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
-    msg["From"] = f"Finnish Agency ERP <{EMAIL_SENDER}>"
+    msg["From"] = f"RekrySilta ERP <{EMAIL_SENDER}>"
     msg["To"] = to_address
     msg["Reply-To"] = EMAIL_REPLY_TO
 
@@ -67,11 +67,11 @@ def send_welcome_credentials_email(
     """
     Dispatches login credentials to newly created operational user.
     """
-    subject = f"Your Login Credentials — Finnish Agency ERP ({company_name})"
+    subject = f"Your Login Credentials — RekrySilta ERP ({company_name})"
     
     text_body = f"""Dear {full_name},
 
-Your operational user account has been successfully created for {company_name} on the Finnish Agency ERP Client Portal.
+Your operational user account has been successfully created for {company_name} on the RekrySilta ERP Client Portal.
 
 Your Login Credentials:
 ------------------------------------------
@@ -86,7 +86,7 @@ Security Notice:
 You will be prompted to set your personal permanent password on your first sign-in.
 
 Best regards,
-Finnish Agency ERP System
+RekrySilta ERP System
 A Product of Nexvorx Technologies
 """
 
@@ -114,7 +114,7 @@ A Product of Nexvorx Technologies
     <body>
       <div class="card">
         <div class="header">
-          <h1>Finnish Agency ERP &bull; Client Portal</h1>
+          <h1>RekrySilta ERP &bull; Client Portal</h1>
           <p>Account Provisioning Confirmation &bull; {company_name}</p>
         </div>
         <div class="content">
@@ -138,7 +138,7 @@ A Product of Nexvorx Technologies
           </p>
         </div>
         <div class="footer">
-          A Product of Nexvorx Technologies &bull; Powered by Finnish Agency ERP &bull; Confidential
+          A Product of Nexvorx Technologies &bull; Powered by RekrySilta ERP &bull; Confidential
         </div>
       </div>
     </body>
@@ -185,7 +185,7 @@ Explanation / Issue Description:
 
 ------------------------------------------------------------
 This email was automatically forwarded to {SUPPORT_INBOX}
-Finnish Agency ERP &bull; A Product of Nexvorx Technologies
+RekrySilta ERP &bull; A Product of Nexvorx Technologies
 """
 
     badge_color = "#eab308" if priority == "MEDIUM" else "#ef4444" if priority in ["HIGH", "CRITICAL"] else "#3b82f6"
@@ -288,7 +288,7 @@ You can also view the updated status and history directly inside your Client Por
 
 Best regards,
 Nexvorx Technologies Support Desk
-Finnish Agency ERP
+RekrySilta ERP
 """
 
     html_body = f"""
@@ -339,7 +339,7 @@ Finnish Agency ERP
           <div class="orig-box">{explanation}</div>
         </div>
         <div class="footer">
-          Finnish Agency ERP &bull; A Product of <strong>Nexvorx Technologies</strong> (Trademark)<br>
+          RekrySilta ERP &bull; A Product of <strong>Nexvorx Technologies</strong> (Trademark)<br>
           If your issue is not fully addressed, you may submit a follow-up ticket in the portal.
         </div>
       </div>

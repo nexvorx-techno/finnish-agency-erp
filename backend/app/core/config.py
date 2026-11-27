@@ -2,7 +2,7 @@ import os
 from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
-    PROJECT_NAME: str = "Finnish Agency ERP - Client Portal API"
+    PROJECT_NAME: str = "RekrySilta ERP - Client Portal API"
     API_V1_STR: str = "/api/v1"
     DATABASE_URL: str = os.getenv(
         "DATABASE_URL",

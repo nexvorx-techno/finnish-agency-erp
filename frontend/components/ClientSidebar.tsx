@@ -367,11 +367,11 @@ export const ClientSidebar: React.FC<ClientSidebarProps> = ({
         <div className="px-5 py-4 border-b border-[var(--border-color)] shrink-0">
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-blue-600 to-indigo-700 text-white flex items-center justify-center font-black text-base shadow-sm">
-              S
+              R
             </div>
             <div>
               <div className="text-sm font-bold tracking-tight text-[var(--text-primary)]">
-                SuomiStaff ERP
+                RekrySilta ERP
               </div>
               <div className="text-[11px] font-medium text-[var(--text-secondary)]">
                 Client Workspace

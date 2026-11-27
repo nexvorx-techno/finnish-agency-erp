@@ -14,8 +14,8 @@ export const GlobalFooter: React.FC<GlobalFooterProps> = () => {
         {/* Left Corner: Enterprise System Status */}
         <div className="flex items-center gap-2 text-[var(--text-secondary)] text-[11px] sm:text-xs font-medium">
           <ShieldCheck className="w-3.5 h-3.5 text-blue-500" />
-          <span className="hidden sm:inline">Nexvorx Cloud Engineering &bull; Finnish Agency ERP</span>
-          <span className="sm:hidden">Nexvorx ERP Desk</span>
+          <span className="hidden sm:inline">Nexvorx Cloud Engineering &bull; RekrySilta ERP</span>
+          <span className="sm:hidden">RekrySilta ERP</span>
         </div>
 
         {/* Right Corner: Nexvorx Technologies Trademark */}

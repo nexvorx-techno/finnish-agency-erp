@@ -87,7 +87,7 @@ export const PwaManager: React.FC = () => {
               New Application Update Available
             </div>
             <p className="text-[11px] text-[var(--text-secondary)] mt-0.5 leading-snug">
-              A newer version of Finnish Agency ERP is ready. Update now to load the latest changes.
+              A newer version of RekrySilta ERP is ready. Update now to load the latest changes.
             </p>
             <div className="flex items-center gap-2 mt-2.5">
               <button

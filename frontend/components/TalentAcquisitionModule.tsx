@@ -1032,7 +1032,7 @@ export const TalentAcquisitionModule: React.FC<TalentAcquisitionModuleProps> = (
                   </div>
 
                   <p className="text-xs text-[var(--text-secondary)] leading-relaxed">
-                    For global candidates sourced outside Finland, SuomiStaff manages all logistics and relocation requirements:
+                    For global candidates sourced outside Finland, RekrySilta manages all logistics and relocation requirements:
                   </p>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs">
@@ -1227,7 +1227,7 @@ export const TalentAcquisitionModule: React.FC<TalentAcquisitionModuleProps> = (
                           {/* Action button */}
                           <div className="pt-2 border-t border-[var(--border-color)] flex items-center justify-between">
                             <span className="text-[11px] text-[var(--text-secondary)]">
-                              Shortlisted by SuomiStaff
+                              Shortlisted by RekrySilta
                             </span>
                             <button
                               type="button"
@@ -1378,7 +1378,7 @@ export const TalentAcquisitionModule: React.FC<TalentAcquisitionModuleProps> = (
             </div>
 
             <div className="text-xs text-[var(--text-secondary)]">
-              Showing candidates shortlisted by SuomiStaff agency algorithm
+              Showing candidates shortlisted by RekrySilta agency algorithm
             </div>
           </div>
 
@@ -1575,7 +1575,7 @@ export const TalentAcquisitionModule: React.FC<TalentAcquisitionModuleProps> = (
             <div className="flex items-center gap-2">
               <UserCheck className="w-4 h-4 shrink-0" />
               <span>
-                SuomiStaff handles end-to-end relocation and onboarding for new recruits: Migri Fast-Track, Finnish DVV identity registration, Tax cards (*Verohallinto*), and furnished company housing.
+                RekrySilta handles end-to-end relocation and onboarding for new recruits: Migri Fast-Track, Finnish DVV identity registration, Tax cards (*Verohallinto*), and furnished company housing.
               </span>
             </div>
             <span className="font-bold underline cursor-pointer">Nordic Onboarding SLA: 21 Days</span>
